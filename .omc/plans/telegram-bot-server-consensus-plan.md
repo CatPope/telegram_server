@@ -4,7 +4,7 @@
 **Spec:** `.omc/specs/deep-interview-telegram-bot-server.md`
 **Mode:** RALPLAN-DR Deliberate (high-risk: auth/security, secrets, CI keys, public API surface)
 **Generated:** 2026-06-21
-**Iteration history:** v1 (REVISE — Architect 15 items, Critic 11 independent + 4 auto-revise conditions) → v2 (Architect APPROVE; Critic REVISE — narrow 5-item editing pass) → v3 (Architect APPROVE — 3 minor residuals; Critic APPROVE-WITH-RESERVATIONS — 3 editorial regressions) → **v4 (this document) — 3 editorial regressions fixed; consensus reached, awaiting user execution approval**
+**Iteration history:** v1 (REVISE — Architect 15 items, Critic 11 independent + 4 auto-revise conditions) → v2 (Architect APPROVE; Critic REVISE — narrow 5-item editing pass) → v3 (Architect APPROVE — 3 minor residuals; Critic APPROVE-WITH-RESERVATIONS — 3 editorial regressions) → v4 (editorial regressions fixed; consensus reached) → **v5 (this document) — integrates spec §Post-Spec Decisions: 안 B 봇 conversation only, 한국법 기반 보관 정책, 동적 다국어, FSM, 개발자 자가등록. No architectural change; awaiting user execution approval.**
 
 ---
 
@@ -622,3 +622,23 @@ All commands assume cwd = repo root, `make` installed, Docker running.
   - **Phase 5 Step-8 P5 resolution committed in writing:** `testdata/skills-harness/` implements both live mode (with `CLAUDE_API_KEY`) and fixture mode (deterministic SDK stub replays `testdata/skills-harness/transcripts/<skill>.json`). Default is fixture mode for third-party reproducibility. Exit criterion updated to require both modes pass.
   - **REL-AC-1 upper bound justified and tightened**: `33s ≤ T ≤ 60s` (was `120s`). Lower bound = 1000/30 rate limit; upper bound = 2× lower bound to allow one full retry cycle but flag dispatcher misbehavior.
   - **Observability adds envelope `schema_version` test** (per Critic ind #3 regression flag): 200 on `schema_version:1`, 400 with `unsupported_envelope_version` on `:99`, 400 with `missing_envelope_version` when omitted. Locks the forward-compatibility contract from MVP.
+- **v5 (Post-Spec Decisions integration — no architectural change, scope clarification + new acceptance criteria):**
+  - Source spec was extended with §"Post-Spec Decisions" — refer to spec for full details. Plan changes summarized below.
+  - **Web UI removed from scope** (안 B 채택): No Telegram Mini App, no Login Widget, no `0.0.0.0` listener, no CSRF/XSS/session management. All user interaction via bot conversation. Plan §"Non-Goals (v1)" should be read with these added.
+  - **Phase 1a migrations expanded**: `migrations/0001_initial.up.sql` includes (additional) `conversation_state`, `pending_grade_requests`, and anonymization columns (`users.anonymized`, `users.preferred_lang`, `users.consecutive_failures`, `users.status`).
+  - **Phase 3 scope expanded** (Bot conversation FSM): adds full slash-command catalog (`/start`, `/agree`, `/apps`, `/me`, `/request-grade`, `/lang`, `/privacy`, `/leave-all`, `/cancel`, `/help`) + admin/dev commands (`/newapp`, `/users`, `/pending`, `/supergroups`, `/topics`, `/audit`, `/quota`, `/rotate`, `/freeze-audit`). Bot conversation FSM stored in Postgres `conversation_state`; survives restart per FSM-AC-1.
+  - **Phase 4 scope adjusted**: admin API still provides programmatic surface, but the bot conversation is now the **primary operator UX**. `/freeze-audit` command added (incident response).
+  - **Phase 5 (Skills) repositioned** as CI/automation surface (developers' programmatic access), not the primary human-facing surface. Skill list unchanged.
+  - **New capabilities added**: `apps.register` (granted to **dev + admin** — developer self-registration), `audit.freeze` (admin only), `users.promote`, `users.deactivate`. Capability matrix YAML extended; CAP-AC scope expands accordingly.
+  - **New AC adopted from spec §Post-Spec**:
+    - PIPA-AC-1: `/start` shows privacy notice + `/agree`; no `users` row persisted until `/agree` clicked.
+    - PIPA-AC-2: `/leave-all` triggers 5-second anonymization (PII columns NULL, `anonymized=true`).
+    - RET-AC-1: Daily cron deletes `audit_log` rows past 1-year (or 2-year if active user count ≥ 10,000). Date-shifted fixture asserts deletion.
+    - RET-AC-2: Active user count ≥ 10,000 fires admin DM alert. Integration test asserts.
+    - LANG-AC-1: `users.preferred_lang='en'` → English system messages; `'ko'` → Korean. fallback chain (`preferred_lang` → Telegram `language_code` → `ko`) verified.
+    - FSM-AC-1: `/request-grade` flow survives bot restart with `conversation_state.payload_json` intact.
+  - **Retention enforcement Phase 7 addition**: `scripts/audit-retention.sh` (or cron job in compose) runs daily, deletes expired rows. Phase 7 verifies idempotent re-runs and respects `/freeze-audit` flag.
+  - **Privacy doc**: `docs/privacy.md` (Korean) shipped in Phase 6 alongside `deployment.md` / `runbook.md`. Lists 처리 항목, 보관 기간, 사용자 권리, /leave-all 절차.
+  - **Bot username**: TBD — operator creates via BotFather, sets env var `TELEGRAM_BOT_USERNAME`, Phase 1a config reads and validates non-empty at startup.
+  - **Privacy mode**: BotFather setting `Privacy mode: ENABLED` (default) — covered in `docs/deployment.md` operator pre-flight checklist.
+  - **No re-consensus required**: changes are scope-additive (no new components, no driver changes, no principle changes). v4 consensus stands; v5 integrates spec extension and updates AC list.
