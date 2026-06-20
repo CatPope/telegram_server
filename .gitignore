@@ -30,5 +30,7 @@ vendor/
 .DS_Store
 Thumbs.db
 
-# Tooling
-.omc/
+# Tooling — track specs/plans (consensus artifacts), ignore ephemeral state/drafts/memory
+.omc/state/
+.omc/drafts/
+.omc/project-memory.json
