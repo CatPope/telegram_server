@@ -8,7 +8,7 @@
 
 ## 1. 개요
 
-API 요청 기반 Telegram 봇 알림 서버를 Go(+telego)로 구축한다. 외부 프로그램이 HTTP API로 알림을 요청하면, 요청자의 capability와 라우팅 모델(직접 지정 / 토픽 게시 / 등급 매칭 / 전체)에 따라 적절한 수신자에게 telego 통해 메시지를 전달한다. Telegram supergroup의 forum topics 구조를 활용해 "프로그램별 알림방"을 제공하며, 사용자는 봇에 /start로 등록하면 기본 'user' 등급으로 시작하고 운영자가 admin/dev로 승격한다. Docker 컨테이너로 패키징되고 GitHub Actions가 GHCR에 이미지를 publish 한 뒤 단일 VM으로 SSH 자동 배포한다.
+API 요청 기반 Telegram 봇 알림 서버를 Go(+telego)로 구축한다. 외부 프로그램이 HTTP API로 알림을 요청하면, 요청자의 capability와 라우팅 모델(직접 지정 / 토픽 게시 / 등급 매칭 / 전체)에 따라 적절한 수신자에게 telego 통해 메시지를 전달한다. Telegram supergroup의 forum topics 구조를 활용해 "프로그램별 알림방"을 제공하며, 사용자는 봇에 /start로 등록하면 기본 'user' 등급으로 시작하고 운영자가 admin/dev로 승격한다. Docker 컨테이너로 패키징되고 GitHub Actions가 GHCR에 이미지를 publish 한 뒤 단일 배포 호스트으로 SSH 자동 배포한다.
 
 ---
 
@@ -40,7 +40,7 @@ API 요청 기반 Telegram 봇 알림 서버를 Go(+telego)로 구축한다. 외
 
 - **배포 및 자동화:**
   - Docker 멀티 스테이지 빌드
-  - GitHub Actions로 GHCR publish + SSH 단일 VM 자동 배포
+  - GitHub Actions로 GHCR publish + SSH 단일 배포 호스트 자동 배포
   - 환경 변수 기반 설정 (시크릿은 mounted secret만)
 
 ### 제약사항
@@ -65,7 +65,7 @@ API 요청 기반 Telegram 봇 알림 서버를 Go(+telego)로 구축한다. 외
 | 3 | User, Group & Permission Registry | 활성 | 수신자 사용자·등급·그룹 관리, capability 기반 권한 정책 | /start 시 기본 'user' + admin 승격 (R9) |
 | 4 | Forum Topic Auto-Provisioning | 활성 | Telegram Supergroup Topics, /start 트리거, 등급 매칭 supergroup 초대 + 토픽 구독 | 메커니즘 완전 명시 (R4) |
 | 5 | Cross-Claude Agent Skills | 활성 | 표준 SKILL.md 기반, 개발자용(send/register-app) + 운영자용(manage-users/topics/audit-search) | 양쪽 대상층 잠금 (R8) |
-| 6 | Deploy Pipeline | 활성 | Dockerfile + GitHub Actions: ghcr.io publish + 단일 VM SSH 자동 배포 | GHCR + SSH auto-deploy (R10-R11) |
+| 6 | Deploy Pipeline | 활성 | Dockerfile + GitHub Actions: ghcr.io publish + 단일 배포 호스트 SSH 자동 배포 | GHCR + SSH auto-deploy (R10-R11) |
 
 **스펙 엔티티:** 30개 (최종 안정도 87%)
 
@@ -86,7 +86,7 @@ API 요청 기반 Telegram 봇 알림 서버를 Go(+telego)로 구축한다. 외
 | R7 | AC 범위 | L2 운영 가능 (추천 채택) |
 | R8 | Skills 정체성 | 개발자용 + 운영자용 양쪽 모두 |
 | R9 | 등급 부여 | 기본 'user' 자동 + 후승격 |
-| R10-R11 | 배포 자동화 | GHCR publish + SSH 단일 VM 자동 배포 |
+| R10-R11 | 배포 자동화 | GHCR publish + SSH 단일 배포 호스트 자동 배포 |
 
 **최종 모호성:** ~16% (임계값 0.20 통과)
 
@@ -279,7 +279,7 @@ curl -X PATCH -H 'Authorization: Bearer dev-admin-key' \
 
 **특징:**
 - PR: lint + test만 (publish/deploy X)
-- main: ci → deploy → GHCR push → SSH VM update
+- main: ci → deploy → GHCR push → SSH 배포 호스트 update
 - Secret-scan: `internal/auth/*` 경로 제외 없음
 - Canary: 심은 시크릿을 주간 탐지 테스트
 
@@ -306,7 +306,7 @@ curl -X PATCH -H 'Authorization: Bearer dev-admin-key' \
 |---|----------|------|--------|-------|
 | 1 | Telegram rate-limit, broadcast 조용히 불완전 | Severe | Token bucket (25/s global, 1/s per chat), 429 구분, retry | 1b, test |
 | 2 | API key 실수로 로그에 유출 | Critical | 타입 RequesterIdentity, redaction regex, CI grep gate (no `internal/auth/*` exclusion), Argon2id hashed, 4-path no-secret test | 1a, 6 |
-| 3 | VM SSH deploy 중 Postgres 손상, auto-recovery 없음 | High | Previous-image rollback, daily pg_dump, healthcheck-gated success, first-deploy bootstrap, operationalized dry-run-rollback.sh | 6, 7 |
+| 3 | 배포 호스트 SSH deploy 중 Postgres 손상, auto-recovery 없음 | High | Previous-image rollback, daily pg_dump, healthcheck-gated success, first-deploy bootstrap, operationalized dry-run-rollback.sh | 6, 7 |
 | 4 | telego long-polling graceful shutdown deadlock | High | Context 스레딩 into telego update channel, REL-AC-2 E2E | 3 |
 | 5 | Migration이 app 시작 후 실행 → crash-loop | High | Compose migrate sidecar (service_completed_successfully), integration test | 1a |
 | 6 | Telegram bot token 중간 회전 → crash-loop | Medium | SIGHUP reload 경로, runbook 문서화 | 3 |
@@ -374,7 +374,7 @@ curl -X PATCH -H 'Authorization: Bearer dev-admin-key' \
 |------|--------|--------|---------|
 | Telegram rate-limit silent drop | High | Token bucket, delivered-only-on-2xx, REL-AC-1 upper bound | Phase 1b |
 | API key 로그 누출 | Critical | Typed RequesterIdentity, redaction, CI grep gate (no exclusion), Argon2id pinned, canary | Phase 1a, 6 |
-| VM deploy 실패, rollback 없음 | High | Previous-image rollback, daily pg_dump, healthcheck-gated, operationalized dry-run | Phase 6, 7 |
+| 배포 호스트 deploy 실패, rollback 없음 | High | Previous-image rollback, daily pg_dump, healthcheck-gated, operationalized dry-run | Phase 6, 7 |
 | telego API drift | Medium | Dispatcher interface, v1.10 pin, integration tests | Phase 1b |
 | SSH key CI 유출 | Critical | Deploy user + forced-command directive (authorized_keys.template) | Phase 6 |
 | Postgres migration race | Medium | Compose migrate sidecar, integration test | Phase 1a |
@@ -383,7 +383,7 @@ curl -X PATCH -H 'Authorization: Bearer dev-admin-key' \
 | Migration after app start | High | Compose ordering + integration test | Phase 1a |
 | Bot token rotation crash-loop | Medium | SIGHUP reload, runbook | Phase 3 |
 | Concurrent capability mutation | Medium | capability_set_version, security-model.md | Phase 4 |
-| Single-VM SPOF | Acknowledged | Spec defers HA; Pre-mortem #3로 생존 가능 | n/a |
+| 단일 호스트 SPOF | Acknowledged | Spec defers HA; Pre-mortem #3로 생존 가능 | n/a |
 
 ---
 
@@ -474,7 +474,7 @@ make e2e-graceful-drain
 ### 6. Deploy pipeline (fixture)
 ```bash
 git push origin main
-# Expect: ci.yml (lint+test) → deploy.yml (publish+SSH) → /healthz 200 from VM
+# Expect: ci.yml (lint+test) → deploy.yml (publish+SSH) → /healthz 200 from 배포 호스트
 ```
 
 ### 7. Skills E2E
