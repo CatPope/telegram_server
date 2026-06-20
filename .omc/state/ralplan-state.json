@@ -1,0 +1,15 @@
+{
+  "active": false,
+  "current_phase": "pending_approval",
+  "plan_path": ".omc/plans/telegram-bot-server-consensus-plan.md",
+  "spec_path": ".omc/specs/deep-interview-telegram-bot-server.md",
+  "consensus_iterations": "3 architect rounds + 3 critic rounds + 4 planner drafts (v1→v4)",
+  "final_verdict": "Architect APPROVE (iter3), Critic APPROVE-WITH-RESERVATIONS (iter3) with 3 named editorial regressions fixed in v4",
+  "plan_status": "pending-approval",
+  "_meta": {
+    "mode": "ralplan",
+    "sessionId": null,
+    "updatedAt": "2026-06-20T15:38:48.466Z",
+    "updatedBy": "state_write_tool"
+  }
+}

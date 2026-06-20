@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"ls -lh \\\"C:\\\\Users\\\\REXI\\\\Documents\\\\GitHub\\\\telegram_server\\\\docs\\\\\\\" && echo \\\"---\\\" && file \\\"C:\\\\Users\\\\REXI\\\\Documents\\\\GitHub\\\\telegram_server\\\\docs\\\\plan.md\\\"\",\"description\":\"Verify...",
+  "error": "Exit code 2\n/usr/bin/bash: eval: line 1: unexpected EOF while looking for matching `\"'",
+  "timestamp": "2026-06-20T15:47:25.441Z",
+  "retry_count": 1
+}

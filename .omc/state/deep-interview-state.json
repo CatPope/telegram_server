@@ -1,0 +1,19 @@
+{
+  "active": true,
+  "current_phase": "spec-pending-approval",
+  "interview_id": "telegram-bot-server-2026-06-20",
+  "threshold": "0.2",
+  "threshold_source": "default",
+  "current_ambiguity": "0.157",
+  "spec_path": ".omc/specs/deep-interview-telegram-bot-server.md",
+  "spec_status": "pending-approval",
+  "challenge_modes_used": "[\"contrarian\", \"simplifier\", \"ontologist\"]",
+  "round_11_summary": "Operational defaults accepted (supergroup bootstrap via AdminSkill, rate limit default unlimited, audit_log full lifecycle, JSON stdout + /healthz). Deploy changed: GHCR + single-VM SSH auto-deploy (R10 → R11 modification).",
+  "round_11_scores": "goal=0.90, constraints=0.85, criteria=0.75, context=0.85",
+  "_meta": {
+    "mode": "deep-interview",
+    "sessionId": null,
+    "updatedAt": "2026-06-20T15:10:24.875Z",
+    "updatedBy": "state_write_tool"
+  }
+}

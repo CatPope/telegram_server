@@ -30,7 +30,4 @@ vendor/
 .DS_Store
 Thumbs.db
 
-# Tooling — track specs/plans (consensus artifacts), ignore ephemeral state/drafts/memory
-.omc/state/
-.omc/drafts/
-.omc/project-memory.json
+# Tooling — entire .omc/ tracked (user request: track all folders)
