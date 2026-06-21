@@ -395,6 +395,9 @@ API 요청 기반 Telegram 봇 알림 서버를 Go(+telego)로 구축한다. 외
 | `deferred` | 재시도 한도(기본 3회) 초과 → 지연 처리 | 최종 재시도 실패 시 |
 | `denied` | 권한 또는 유효성 거부 | 검증 실패 시점 (다른 행 없음) |
 | `failed` | Telegram 비복구성 오류 (4xx 그 외, 한도 초과 5xx) | 최종 Error 응답 시 |
+| `intrusion_kick` (v6) | 사용자 supergroup 침입자 감지 → `banChatMember` 호출 | `chat_member` event 처리 시 |
+| `intrusion_unmitigated` (v6) | 침입자 감지 + Ban Users 권한 부재 → ban 실패 | ban 호출 실패 시 |
+| `bot_not_admin` (v6) | dispatch 사전 검증에서 봇이 사용자 supergroup admin 아님 → 차단 | dispatch 직전 검증 시 |
 
 ### 8.2 Trace ID 추적
 
@@ -559,6 +562,12 @@ type RateLimiter interface {
 - 외부 ID 시스템 연동 (HR DB 등)
 - 다중 클라우드 / K8s / 서버리스
 
+**v6 추가 보류 (v7 후속 검토):**
+
+- 가입 앱 변경 시 forum topic 재생성 vs 이름 변경 vs unmount 정책 — v6는 새 topic 생성 + 구 topic close (archived 보존)로 간소화
+- DM rate-limit per-user 별도 quota — v6는 글로벌 1msg/s/chat 적용
+- Admin 강제 가입/해지 시 사용자 사후 통지 흐름 (현재는 즉시 적용 + audit 기록만)
+
 ---
 
 ## 12. 보안 정책
@@ -646,6 +655,10 @@ type RateLimiter interface {
 | Rollback | `docker pull ghcr.io/.../previous && docker compose up -d` |
 | Postgres restore | `pg_restore < backup.sql` (일일 pg_dump 활용) |
 | Audit freeze (침해) | `/freeze-audit` 봇 명령 → audit 삭제 일시 정지 |
+| (v6) 사용자 supergroup 링크 상태 조회 | `/users <user_id>` → `personal_supergroup_chat_id`, `bot_is_admin_in_supergroup`, `user_topics` 행 수 표시 |
+| (v6) 봇 supergroup 추방 복구 | 운영자가 사용자에게 안내 → 사용자가 봇 재초대 + admin(Post/Manage Topics/Ban Users) 부여 → 자동 감지로 `bot_is_admin_in_supergroup=true` 복귀; 또는 사용자가 `/start`로 새 supergroup 재설정 |
+| (v6) Personal supergroup re-link 강제 | DB에서 `users.personal_supergroup_chat_id=NULL, bot_is_admin_in_supergroup=false` 직접 수정 → 사용자 `/start` 재실행 시 새 startgroup 딥링크 발급 |
+| (v6) 강제 가입/해지 | `POST/DELETE /admin/users/{id}/subscriptions/{app_id}` 또는 `manage-apps` skill — 즉시 적용 + audit `forced_subscription` 행 |
 
 ---
 
@@ -786,11 +799,15 @@ type RateLimiter interface {
 ## 17. 봇 Username
 
 **상태:** TBD  
+**v6에서 load-bearing**: 등록 플로우 §3.4 step 4의 [그룹 만들기] 버튼이 `t.me/<TELEGRAM_BOT_USERNAME>?startgroup=<one_time_token>` 딥링크를 사용하므로 username 미설정 시 등록 자체 불가.
+
 **결정 프로세스:**
 1. 운영자가 BotFather에서 봇 생성
 2. Username 할당 (예: `CatPope_NotifyBot`)
-3. 환경 변수 `TELEGRAM_BOT_USERNAME` 정의
-4. Phase 1a config에서 읽음 & 시작 시 검증
+3. BotFather에서 **Bot Settings → Group Privacy = Enabled** 확인 (기본값)
+4. BotFather에서 **Bot Settings → Group Admin Rights** 사전 설정 (Post Messages / Manage Topics / Ban Users) — 사용자가 그룹에 추가 시 권한 자동 요청
+5. 환경 변수 `TELEGRAM_BOT_TOKEN` + `TELEGRAM_BOT_USERNAME` 정의
+6. Phase 1a config에서 둘 다 읽음 & 시작 시 비어있지 않은지 검증 (실패 시 fail-fast)
 
 ---
 

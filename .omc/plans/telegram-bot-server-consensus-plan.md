@@ -226,7 +226,7 @@ All 30 ontology entities and L2 acceptance criteria are inherited verbatim from 
 
 - **`internal/auth/capability_test.go`**: Bearer parsing rejects malformed; capability resolution deny/allow paths; argon2id verify accepts known-good and rejects tampered.
 - **`internal/auth/argon2_test.go` (v2 per Architect #7)**: **Work factors are pinned as constants** (memory=64 MiB, iterations=3, parallelism=1). Test asserts the verifier reads exactly those constants. CI fails if anyone weakens parameters.
-- **`internal/dispatch/strategy/*_test.go`**: Each `RouteStrategy.Resolve` for the 4 strategies produces correct `[]RecipientHandle`; typed errors for unknown user/topic/grade.
+- **`internal/dispatch/strategy/*_test.go` (v6)**: Each `RouteStrategy.Resolve` for the 4 v6 strategies — **direct**, **direct-dm**, **topic**, **broadcast-all** — produces correct `[]RecipientHandle`; typed errors for unknown user / unsubscribed `app_id` (direct/topic) / unknown `app_id` / grade-insufficient. `grade-broadcast` strategy removed in v6.
 - **`internal/hook/chain_test.go`** (lands in Phase 2, not Phase 1 — v2 per Architect #8): Hook chain executes pre → core → post in order; on-error fires; pre-hook short-circuit blocks core and post. **Hook interface signature defined in this phase** (v2 per Critic ind #6): `Hook.Run(ctx, req) (HookResult, error)` with `HookResult` having `Continue bool` and `Stage Stage` fields.
 - **`internal/dispatch/telegram/ratelimit_test.go`**: Token bucket releases at configured rate; 429 triggers retry with `retry_after`; 5xx triggers exponential backoff up to N attempts.
 - **`internal/ratelimit/limiter_test.go` (v2 per Architect #9)**: A single `RateLimiter` interface with two implementations — `DispatchLimiter` (chat-grain, Telegram side) and `RequestLimiter` (app-grain, HTTP middleware side). Same interface, distinct configuration sources. Tests assert both implementations satisfy the contract.
@@ -246,15 +246,19 @@ All 30 ontology entities and L2 acceptance criteria are inherited verbatim from 
 
 E2E uses `testcontainers-go` for Postgres + `mocktelegram` stub.
 
-- **happy-path direct:** Compose → fixture app + user → POST `/v1/messages/direct` → mocktelegram receives `sendMessage` for chat 42 → `/healthz` stays 200 → 4 audit rows in order.
-- **happy-path topic:** Same shape; multiple subscribers' messages arrive at mocktelegram.
-- **happy-path grade-broadcast (v2 per Critic ind #8):** POST `/v1/messages/grade-broadcast` with `min_grade: developer` → mocktelegram receives messages to all developer+admin users, none for user-grade.
-- **happy-path broadcast (rate-limited):** Send 100 broadcast requests in <100ms → mocktelegram receives at ≤30/s → 100 audit rows reach `delivered` within 5s (Critic ind #G: upper bound asserted, not just floor).
-- **denied flow:** Request with insufficient capability → 403 → audit `received → denied` only.
+- **happy-path direct (v6):** Compose → fixture subscribed user (`user_subscriptions` + `user_topics` row) → POST `/v1/messages/direct` with `app_id` → mocktelegram receives `sendMessage` for `personal_supergroup_chat_id` with `message_thread_id` → `/healthz` stays 200 → 4 audit rows in order; `delivery_channel='supergroup'`.
+- **happy-path direct-dm (v6 신규, DM-AC-1):** admin caller → POST `/v1/messages/direct-dm` → mocktelegram receives `sendMessage` for `users.telegram_id` (bot DM) → 4 audit rows, `delivery_channel='dm'`. dev/user caller → 403.
+- **happy-path topic (v6, TOPIC-AC-1):** POST `/v1/messages/topic` with `app_id` → mocktelegram receives `sendMessage` per subscriber to their personal supergroup app topic. Variant with optional `min_grade` → only users with `users.grade ≥ max(apps.min_grade, request.min_grade)` receive.
+- **happy-path broadcast (rate-limited, v6):** Send 100 broadcast requests in <100ms → mocktelegram receives at ≤30/s → 100 audit rows reach `delivered` within 5s; each delivery to a user's **General topic** with `delivery_channel='general'` (Critic ind #G: upper bound asserted, not just floor).
+- **denied flow — insufficient capability:** Request with insufficient capability → 403 → audit `received → denied` only.
 - **denied flow — unknown recipient (v2):** `/v1/messages/direct` with unknown user_id → 400 → audit `received → denied`.
-- **restart preservation:** Stop and restart app; verify `apps`, `users`, `topics`, `audit_log` survive; subsequent request succeeds.
+- **denied flow — recipient_not_subscribed (v6 신규):** `/v1/messages/direct` with `app_id` not in recipient's `user_subscriptions` → 400 `recipient_not_subscribed` → audit `received → denied`.
+- **restart preservation (v6):** Stop and restart app; verify `apps`, `users`, `user_subscriptions`, `user_topics`, `audit_log` survive; subsequent request succeeds.
 - **Graceful drain (v2 per Architect #15, Pre-mortem #4):** Start a long-running broadcast; send SIGTERM; assert readiness=0 within 10s; assert audit log has matching `delivered` row for each `dispatched` started before SIGTERM (zero drops).
-- **/start 60-second SLA (v2 per Critic ind #L):** Send `/start`; assert that within 60s the `users` row exists, supergroup invite has been sent to mocktelegram, and matching topics are subscribed.
+- **/start full setup (v6, SG-AC-1):** `/start` → `/agree` → users row → DM with [그룹 만들기] startgroup deeplink button. Emulate user-create-group via `my_chat_member` with token → `personal_supergroup_chat_id` linked. Emulate Topics enable + bot admin (Post Messages + Manage Topics + Ban Users) → bot calls `createForumTopic` per subscribed app within 60s → `user_topics` rows + "준비 완료" DM.
+- **intrusion kick E2E (v6 신규, SG-AC-2):** With user fully linked, emulate `chat_member` event of non-owner addition → bot calls `banChatMember` within 1s → `audit_log` row with `stage='intrusion_kick'`.
+- **/apps subscribe + unsubscribe E2E (v6 신규, SUB-AC-1):** `/apps` toggle subscribe → 1s 이내 `user_topics` insert + `createForumTopic` call. Toggle unsubscribe → row delete + `closeForumTopic` call.
+- **bot kicked from supergroup (v6 신규, Pre-mortem #9):** Emulate `my_chat_member` `left` event for bot → `users.bot_is_admin_in_supergroup=false`. Subsequent direct send to that user → 503 `bot_not_admin` + audit row; other recipients in batch unaffected.
 
 ### Observability
 
