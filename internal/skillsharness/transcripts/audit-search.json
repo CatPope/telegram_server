@@ -1,0 +1,16 @@
+{
+  "skill": "audit-search",
+  "description": "happy path: search audit log with a limit filter",
+  "env": {
+    "TELEGRAM_API_KEY": "tg_devadmin_0123456789abcdef0123456789abcdef"
+  },
+  "http_calls": [
+    {
+      "method": "GET",
+      "path": "/admin/audit/search?limit=5",
+      "expected_status": 200,
+      "assert_body_contains": ["\"results\"", "\"limit\""]
+    }
+  ],
+  "expected_mocktelegram_calls": []
+}

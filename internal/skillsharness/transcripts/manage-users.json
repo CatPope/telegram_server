@@ -1,0 +1,26 @@
+{
+  "skill": "manage-users",
+  "description": "happy path: promote a user to developer grade, then subscribe them to an app",
+  "env": {
+    "TELEGRAM_API_KEY": "tg_devadmin_0123456789abcdef0123456789abcdef"
+  },
+  "http_calls": [
+    {
+      "method": "PATCH",
+      "path": "/admin/users/1",
+      "body": {
+        "grade": "developer"
+      },
+      "expected_status": 200,
+      "assert_body_contains": ["\"grade\"", "developer"]
+    },
+    {
+      "method": "POST",
+      "path": "/admin/users/1/subscriptions/deploy-alerts",
+      "body": {},
+      "expected_status": 200,
+      "assert_body_contains": ["\"subscribed\""]
+    }
+  ],
+  "expected_mocktelegram_calls": []
+}

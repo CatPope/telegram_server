@@ -128,6 +128,31 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Introspection endpoint: GET /test/calls returns all recorded calls as JSON.
+	// Used by the skills harness to assert side-effects on the mock.
+	if r.URL.Path == "/test/calls" && r.Method == http.MethodGet {
+		calls := s.Calls()
+		out := make([]map[string]any, len(calls))
+		for i, c := range calls {
+			out[i] = map[string]any{
+				"method": c.Method,
+				"token":  c.Token,
+				"body":   c.Body,
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		writeJSON(w, out)
+		return
+	}
+
+	// Reset endpoint: POST /test/reset clears recorded calls.
+	if r.URL.Path == "/test/reset" && r.Method == http.MethodPost {
+		s.Reset()
+		w.Header().Set("Content-Type", "application/json")
+		writeJSON(w, map[string]any{"ok": true})
+		return
+	}
+
 	// path expected: /bot<token>/<method>
 	const prefix = "/bot"
 	if !strings.HasPrefix(r.URL.Path, prefix) {

@@ -1,0 +1,29 @@
+{
+  "skill": "manage-apps",
+  "description": "happy path: create an app then soft-delete it",
+  "env": {
+    "TELEGRAM_API_KEY": "tg_devadmin_0123456789abcdef0123456789abcdef"
+  },
+  "http_calls": [
+    {
+      "method": "POST",
+      "path": "/admin/apps",
+      "body": {
+        "id": "phase5-lifecycle-app",
+        "name": "Phase 5 Lifecycle App",
+        "description": "Created and deleted by the skills harness",
+        "min_grade": "user",
+        "capabilities": ["messages.direct.send"]
+      },
+      "expected_status": 201,
+      "assert_body_contains": ["\"id\"", "phase5-lifecycle-app"]
+    },
+    {
+      "method": "DELETE",
+      "path": "/admin/apps/phase5-lifecycle-app",
+      "expected_status": 200,
+      "assert_body_contains": ["\"active\"", "false"]
+    }
+  ],
+  "expected_mocktelegram_calls": []
+}

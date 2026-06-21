@@ -1,0 +1,26 @@
+{
+  "skill": "send-notification",
+  "description": "happy path: admin sends direct notification to recipient user 1",
+  "env": {
+    "TELEGRAM_API_KEY": "tg_devadmin_0123456789abcdef0123456789abcdef"
+  },
+  "http_calls": [
+    {
+      "method": "POST",
+      "path": "/v1/messages/direct",
+      "body": {
+        "recipients": [1],
+        "app_id": "deploy-alerts",
+        "envelope": {
+          "text": "phase5 harness smoke test",
+          "schema_version": 1
+        }
+      },
+      "expected_status": 200,
+      "assert_body_contains": ["\"delivered\""]
+    }
+  ],
+  "expected_mocktelegram_calls": [
+    {"method": "sendMessage", "min_count": 1}
+  ]
+}

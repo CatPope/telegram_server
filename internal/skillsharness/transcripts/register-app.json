@@ -1,0 +1,23 @@
+{
+  "skill": "register-app",
+  "description": "happy path: register a new app with a single capability",
+  "env": {
+    "TELEGRAM_API_KEY": "tg_devadmin_0123456789abcdef0123456789abcdef"
+  },
+  "http_calls": [
+    {
+      "method": "POST",
+      "path": "/admin/apps",
+      "body": {
+        "id": "phase5-test-app",
+        "name": "Phase 5 Test App",
+        "description": "Created by the skills harness",
+        "min_grade": "user",
+        "capabilities": ["messages.direct.send"]
+      },
+      "expected_status": 201,
+      "assert_body_contains": ["\"id\"", "phase5-test-app"]
+    }
+  ],
+  "expected_mocktelegram_calls": []
+}
