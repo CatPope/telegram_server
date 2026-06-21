@@ -1,9 +1,9 @@
 # Telegram 봇 알림 서버 — 통합 설계 문서 (v5)
 
-**최종 상태:** Architect + Critic 합의 완료 (v5)  
-**스펙:** `.omc/specs/deep-interview-telegram-bot-server.md` (§Post-Spec Decisions 포함)  
-**계획:** `.omc/plans/telegram-bot-server-consensus-plan.md` (v5)  
-**생성:** 2026-06-21
+**최종 상태:** Architect + Critic 합의 완료 (v5) + v6 architecture pivot (1인 1 personal supergroup, API 5 endpoint, direct-dm/min_grade 통합) — spec §Post-Spec Decisions v6에 잠금  
+**스펙:** `.omc/specs/deep-interview-telegram-bot-server.md` (§Post-Spec Decisions v5/v6 포함)  
+**계획:** `.omc/plans/telegram-bot-server-consensus-plan.md` (v6)  
+**생성:** 2026-06-21 (v6 통합 작업)
 
 ---
 
@@ -47,10 +47,10 @@ API 요청 기반 Telegram 봇 알림 서버를 Go(+telego)로 구축한다. 외
 
 | 엔드포인트 | 메서드 | 요청 본문 | 설명 | 필수 Capability |
 |-----------|--------|---------|------|-----------------|
-| `/v1/messages/direct` | POST | `{recipients: [user_id...], envelope}` | 지정 사용자에게 직접 전송 | `messages.direct.send` |
-| `/v1/messages/topic` | POST | `{topic, envelope}` | 특정 topic 구독자 전원 전송 | `messages.topic.publish.*` |
-| `/v1/messages/grade-broadcast` | POST | `{min_grade, envelope}` | min_grade 이상 사용자 전부 전송 | `messages.grade-broadcast` |
-| `/v1/messages/broadcast` | POST | `{envelope}` | 전체 사용자 전송 | `messages.broadcast.all` |
+| `/v1/messages/direct` | POST | `{recipients:[user_id...], app_id, envelope}` | 각 recipient의 개인 supergroup의 `app_id` 토픽에 게시; 미구독자 → 400 `recipient_not_subscribed` | `messages.direct.send` |
+| `/v1/messages/direct-dm` | POST | `{recipients:[user_id...], envelope}` | 각 recipient의 봇 DM(1:1)에 직접 push; 구독·앱·grade 우회 | `messages.direct.dm` (**admin only**) |
+| `/v1/messages/topic` | POST | `{app_id, envelope, min_grade?}` | `app_id` 구독자 중 `users.grade ≥ max(apps.min_grade, request.min_grade)` 통과자 전원의 개인 supergroup의 `app_id` 토픽 | `messages.topic.publish.*` |
+| `/v1/messages/broadcast` | POST | `{envelope, min_grade?}` | 전체 활성 사용자(grade 통과자)의 개인 supergroup **General topic** | `messages.broadcast.all` |
 | `/healthz` | GET | - | 헬스 체크 (status: ok) | 없음 |
 
 **요청 envelope 스키마:**
@@ -111,26 +111,27 @@ API 요청 기반 Telegram 봇 알림 서버를 Go(+telego)로 구축한다. 외
 
 | Capability | 부여 등급 | 설명 |
 |-----------|----------|------|
-| `messages.direct.send` | dev, admin | Direct 메시지 전송 |
-| `messages.topic.publish.*` | dev, admin | Topic 게시 |
-| `messages.grade-broadcast` | dev, admin | Grade broadcast |
-| `messages.broadcast.all` | admin | 전체 broadcast |
+| `messages.direct.send` | dev, admin | 개인 supergroup의 `app_id` 토픽에 게시 |
+| `messages.direct.dm` ⭐ | **admin only** | 봇 DM 직접 push (구독·grade 우회 강제) |
+| `messages.topic.publish.*` | dev, admin | Topic 게시 + 옵션 `min_grade` 필터 |
+| `messages.broadcast.all` | admin | 전체 사용자 General topic + 옵션 `min_grade` 필터 |
 | `apps.register` | **dev, admin** | 개발자 자가 앱 등록 |
 | `users.promote` | admin | 사용자 등급 승격 (dev는 본인 등급 자가 강등만 가능) |
 | `users.deactivate` | admin | 사용자 비활성화 |
-| `topics.manage` | admin | Topic 관리 |
-| `supergroups.manage` | admin | Supergroup 관리 |
 | `audit.search` | dev, admin | 감사 로그 검색 |
 | `audit.freeze` | admin | Audit 삭제 정지 |
 | `noop.invoke` | 모든 등급 | Phase 1a 테스트용 |
+| ~~`messages.grade-broadcast`~~ | ~~dev, admin~~ | **v6에서 삭제** (`min_grade` 옵션이 흡수) |
+| ~~`topics.manage`~~ | ~~admin~~ | **v6에서 삭제** (개인 supergroup의 forum topic은 자동 관리) |
+| ~~`supergroups.manage`~~ | ~~admin~~ | **v6에서 삭제** (공유 supergroup 개념 폐기) |
 
 **Grade와 Capability 매핑:**
 
 | Grade | Capabilities |
 |-------|--------------|
 | **user** | (없음 — API 접근 불가) |
-| **developer** | messages.direct, messages.topic.*, messages.grade-broadcast, apps.register, audit.search |
-| **admin** | 모든 Capability |
+| **developer** | messages.direct.send, messages.topic.publish.*, apps.register, audit.search |
+| **admin** | 모든 Capability (`messages.direct.dm`, `messages.broadcast.all`, `users.promote/deactivate`, `audit.freeze` 포함) |
 
 ### 3.3 사용자 등록 및 등급 정책
 
@@ -150,20 +151,28 @@ API 요청 기반 Telegram 봇 알림 서버를 Go(+telego)로 구축한다. 외
 - **사용자 자가 신청:** `/request-grade` FSM (등급 선택 → 사유 입력) → admin/dev 승인 대기
 - **자동 승급:** 없음 (모든 승급은 운영자 명시 승인 필수)
 
-### 3.4 사용자 등록 플로우 (SLA: 60초)
+### 3.4 사용자 등록 플로우 (v6 — Personal Supergroup, SLA: 봇 처리 60초)
 
-1. 사용자가 봇에게 `/start` 명령 전송
-2. 봇이 PIPA 처리방침 안내 + `/agree` 버튼 표시
-3. 사용자가 `/agree` 클릭
-4. 봇이 `users` 테이블에 'user' 등급으로 등록
-5. 매칭되는 supergroup 결정 (사용자의 grade와 매핑)
-6. Supergroup 초대 링크 또는 자동 추가
-7. 초대 supergroup의 모든 공개 topic 자동 구독
-8. 사용자에게 완료 메시지 + 토픽 목록 안내
+1. 사용자 → 봇 DM: `/start`
+2. 봇 → 사용자: PIPA 처리방침 안내 + `/agree` 버튼
+3. 사용자: `/agree` 클릭 → `users` 행 생성 (grade='user', `personal_supergroup_chat_id` NULL, `agreed_at`=now)
+4. 봇 → 사용자: 안내 메시지 + [그룹 만들기] 버튼 (`t.me/<bot_username>?startgroup=<one_time_token>`; `pending_supergroup_tokens` 테이블에 매핑)
+5. 사용자: 버튼 탭 → Telegram "그룹 추가" 다이얼로그 → "새 그룹" + 그룹 이름 입력 + Create → 봇이 새 그룹에 자동 추가됨 (`my_chat_member` event payload에 token)
+6. 사용자: 그룹 설정 → **Topics 토글 ON** (자동으로 supergroup 승격)
+7. 사용자: 그룹 설정 → 봇 Promote → **Post Messages + Manage Topics + Ban Users** 권한 부여
+8. (자동) 봇: `my_chat_member` event에서 token 매칭 → `users.personal_supergroup_chat_id` 저장 + `bot_is_admin_in_supergroup=true` → `(user.grade, user_subscriptions)` 기반 forum topic 자동 생성 (`telego.CreateForumTopic` × N) → `user_topics` 행 삽입 → 사용자에게 "준비 완료" DM + 생성된 토픽 목록
+
+**SLA**: 봇 측 처리(8번 자동 단계) **60초 이내**. 사용자 페이스 단계(4~7)는 SLA 제외.
 
 **재호출 /start:**
 - 기존 사용자가 `/start` 재호출 → 중복 생성 없음
-- 사용자에게 "이미 등록되셨습니다" 안내 메시지 전송
+- `personal_supergroup_chat_id`가 NULL이면 4번 버튼 재발송
+- 이미 링크되어 있으면 "이미 등록되셨습니다" + 본인 supergroup 정보 안내
+
+**침입자 방어 (운영 정책 자동 강제):**
+- 봇은 본인 supergroup의 `chat_member` update를 모니터링
+- 사용자·봇 외 신규 멤버 감지 → 즉시 `banChatMember` 호출 + `audit_log` `intrusion_kick` 행 기록
+- Ban Users 권한 결여 시 사용자에 경고 DM + admin alert
 
 ### 3.5 Conversation FSM 상태 저장
 
@@ -284,19 +293,21 @@ API 요청 기반 Telegram 봇 알림 서버를 Go(+telego)로 구축한다. 외
 
 ## 6. Telegram Supergroup 및 Forum Topics 구조
 
-### 6.1 설계
+### 6.1 설계 (v6 — Personal Supergroup)
 
-- **Supergroup:** Grade별 하나의 논리적 그룹 (예: user-grade, developer-grade, admin-grade)
-- **Forum Topics:** Supergroup 내 프로그램별 알림 채널
-  - Topic 이름 = 프로그램 이름 (예: "일일 리포트", "배포 알림", "보안 감지")
-  - Topic ID는 grade 매칭 supergroup 내에서 고유
+- **Personal Supergroup**: 사용자 1명당 1개 (멤버 = 사용자 + 봇 only). 사용자가 직접 생성하고 봇을 admin으로 초대 (Post Messages + Manage Topics + Ban Users)
+- **Forum Topics**: 사용자 개인 supergroup 내부에 본인이 구독한 앱(=프로그램)별 알림 채널
+  - Topic 이름 = 앱 이름 (예: `deploy-alerts`, `server-monitor`, `security-events`)
+  - **Topic ID(`telegram_topic_id`)는 사용자별로 다름** → `user_topics` 테이블에 `(user_id, app_id, telegram_topic_id)` 매핑
+  - **General topic** = forum 활성화 시 자동 생성되는 기본 토픽; `broadcast` 전송 대상
 
-### 6.2 사용자 그룹핑
+### 6.2 사용자 가시성 결정 (동적 파생)
 
-1. 사용자의 `grade` 결정 (user/dev/admin)
-2. 매칭되는 supergroup 선택 (grade별 1개)
-3. 그 supergroup의 **공개 topic** 모두 자동 구독
-4. Grade가 올라가면 상위 supergroup으로 이동
+1. 사용자의 grade 결정 (default 'user', 운영자 승격 또는 `/request-grade` 신청)
+2. 가시 토픽 = `(users.grade ≥ apps.min_grade) ∧ user_subscriptions(user, app)` 동적 파생 — `topic_subscribers`/`subscription_rules` 테이블 없음
+3. 사용자 `/apps` 명령으로 가입 가능 앱(grade 통과) 목록 + 가입/탈퇴 토글 → `user_subscriptions` 행 변경 + `telego.CreateForumTopic`/`CloseForumTopic` 호출 → `user_topics` 동기화
+4. Grade 상승 시 새로 가시화된 앱은 `/apps`에서 신규 가입 가능; Grade 하락 시 비가시화된 앱의 토픽은 close (archived 보존)
+5. **운영 정책 — 타인 초대 비허용**: 봇이 `chat_member` 감지 시 자동 추방 (§3.4 참조)
 
 ### 6.3 Bot Privacy Mode
 
@@ -306,39 +317,65 @@ API 요청 기반 Telegram 봇 알림 서버를 Go(+telego)로 구축한다. 외
 
 ---
 
-## 7. 4가지 라우팅 전략 (RouteStrategy 인터페이스)
+## 7. 5가지 라우팅 전략 (RouteStrategy 인터페이스, v6)
 
 ### 7.1 Direct Strategy (`POST /v1/messages/direct`)
 
 ```
+요청: {recipients: [42, 99], app_id: "deploy-alerts", envelope: {...}}
+→ Route: 각 recipient의 (user, app_id) 쌍으로 user_topics 조회
+  → personal_supergroup_chat_id + telegram_topic_id 해석
+  → telego.SendMessage(chat_id=..., message_thread_id=...)
+→ 오류:
+  - recipient 1명이라도 user_subscriptions에 없음 → 400 `recipient_not_subscribed`
+  - recipient의 personal_supergroup 미링크 → 400 `recipient_not_linked`
+  - 봇이 그 supergroup에 admin 아님 → 503 `bot_not_admin` + 사용자 alert
+```
+
+### 7.2 Direct-DM Strategy (`POST /v1/messages/direct-dm`, v6 신규)
+
+```
 요청: {recipients: [42, 99], envelope: {...}}
-→ Route: 명시 지정된 user_id들에게만 전송
-→ 오류: unknown user_id → 400 Bad Request
+→ Route: 각 recipient의 users.telegram_id 직접 사용
+  → telego.SendMessage(chat_id=telegram_id) — 봇 DM
+→ 구독·앱·grade 우회 (강제 push)
+→ Capability: messages.direct.dm (admin only)
+→ Audit: delivery_channel='dm'
+→ 오류:
+  - capability 부족 → 403
+  - recipient 미존재 또는 anonymized → 400
 ```
 
-### 7.2 Topic Strategy (`POST /v1/messages/topic`)
+### 7.3 Topic Strategy (`POST /v1/messages/topic`)
 
 ```
-요청: {topic: "deploy-alerts", envelope: {...}}
-→ Route: 해당 topic의 **모든 구독자**에게 전송
-→ 오류: unknown topic → 400 Bad Request
-```
-
-### 7.3 Grade-Broadcast Strategy (`POST /v1/messages/grade-broadcast`)
-
-```
-요청: {min_grade: "developer", envelope: {...}}
-→ Route: developer 등급 이상(developer + admin)인 **모든 사용자**에게 전송
-→ 오류: min_grade > app.grade → 403 Forbidden
+요청: {app_id: "deploy-alerts", envelope: {...}, min_grade?: "developer"}
+→ Route: 효과적 grade = max(apps.min_grade, request.min_grade)
+  → SELECT user_id FROM user_subscriptions JOIN users
+     WHERE app_id=? AND grade >= effective_min_grade AND status='active'
+  → 각 user의 user_topics에서 telegram_topic_id 해석
+  → §7.1과 동일 경로로 전송
+→ 오류: unknown app_id → 400; effective_min_grade > app.grade → 403
 ```
 
 ### 7.4 Broadcast-All Strategy (`POST /v1/messages/broadcast`)
 
 ```
-요청: {envelope: {...}}
-→ Route: **전체 활성 사용자**에게 전송
-→ 오류: broadcast.all capability 없음 → 403 Forbidden
+요청: {envelope: {...}, min_grade?: "developer"}
+→ Route: SELECT user_id FROM users
+         WHERE status='active' AND grade >= (request.min_grade ?? 'user')
+  → 각 user의 personal_supergroup_chat_id의 General topic에 게시
+     (message_thread_id 생략 또는 1)
+→ Capability: messages.broadcast.all (admin)
+→ Audit: delivery_channel='general'
+→ 오류: broadcast.all capability 없음 → 403
 ```
+
+### 7.5 v5 → v6 변경 요약
+
+- `POST /v1/messages/grade-broadcast` 및 `messages.grade-broadcast` capability **삭제** — `min_grade` 옵션이 `topic`/`broadcast`에 흡수
+- `POST /v1/messages/direct-dm` **신설** — 봇 DM 채널, admin only
+- 모든 supergroup 대상 전송은 사용자의 **personal supergroup**으로 (이전 grade별 공유 supergroup 폐기)
 
 ---
 
@@ -418,7 +455,7 @@ type RateLimiter interface {
 | 1 | API Gateway & Requester Auth | 활성 | HTTP endpoint(/v1/messages/*) + Bearer API key + capability 권한 검사 | 1a (perimeter), 1b (handler) |
 | 2 | Notification Dispatch & Routing | 활성 | 4 routing 모델 + telego 전송 | 1b (direct), 2 (나머지) |
 | 3 | User, Group & Permission Registry | 활성 | 수신자 사용자·등급·그룹 관리, capability 기반 권한 정책 | 3 (/start), 4 (admin API) |
-| 4 | Forum Topic Auto-Provisioning | 활성 | Telegram Supergroup Topics, /start 트리거, 등급 매칭 supergroup 초대 + 토픽 구독 | 3 (InviteFlow) |
+| 4 | Personal Supergroup + Topic Auto-Provisioning | 활성 | 사용자 1명당 개인 supergroup (user + bot only), 가시 앱(`user.grade ≥ apps.min_grade ∧ user_subscriptions`)마다 forum topic 자동 생성, 타인 초대 자동 추방 | 3 (startgroup 딥링크, intrusion, topic_provisioner) |
 | 5 | Cross-Claude Agent Skills | 활성 | 표준 SKILL.md 기반, 개발자용(send/register-app) + 운영자용(manage-users/topics/audit-search) | 5 (Skills) |
 | 6 | Deploy Pipeline | 활성 | Dockerfile + GitHub Actions: ghcr.io publish + 단일 배포 호스트 SSH 자동 배포 | 6 (CI/CD) |
 
@@ -441,17 +478,21 @@ type RateLimiter interface {
 - RouteStrategy (direct), Dispatcher (telego)
 - Exit: direct message 전송 E2E, 4개 audit row 생성
 
-#### Phase 2 — 나머지 3개 엔드포인트 + Hook 체인 (3–5 commits)
-- `/v1/messages/topic`, `/v1/messages/grade-broadcast`, `/v1/messages/broadcast`
-- Hook interface (pre/post/error)
-- Exit: 모든 4개 엔드포인트 happy path + 권한 거부 테스트
+#### Phase 2 — 나머지 3개 엔드포인트 + Hook 체인 (3–5 commits, v6)
+- `/v1/messages/topic` (옵션 `min_grade`), `/v1/messages/direct-dm` (admin only), `/v1/messages/broadcast` (옵션 `min_grade`, General topic)
+- Hook interface (pre/post/error) + builtin `audit_hook` (delivery_channel 기록)
+- Exit: 5개 엔드포인트(1b의 direct 포함) happy path + 권한 거부 + min_grade 필터 + DM-AC-1
 
-#### Phase 3 — Bot 핸들러 + `/start` 등록 플로우 (3–5 commits)
+#### Phase 3 — Bot 핸들러 + 개인 supergroup 셋업 (3–5 commits, v6)
 - telego long-polling (context 스레딩)
-- `/start` 명령 핸들러, InviteFlow
+- `/start` FSM (PIPA → `/agree` → `users` 행 생성 → startgroup 딥링크 버튼)
+- `internal/bot/startgroup.go` — one-time 토큰 발급 + `my_chat_member` 매칭으로 `personal_supergroup_chat_id` 링크
+- `internal/bot/intrusion.go` — `chat_member` 리스너로 침입자 자동 `banChatMember`
+- `internal/bot/topic_provisioner.go` — 가시 앱마다 forum topic 자동 생성/close
+- `/apps` FSM (가입/탈퇴 토글 + topic_provisioner 트리거)
 - Conversation FSM (Postgres `conversation_state`)
 - SIGHUP 시 `TELEGRAM_BOT_TOKEN` 재로드 경로 (Pre-mortem #6)
-- Exit: `/start` 60초 SLA, graceful drain (SIGTERM 10초 내), SIGHUP 토큰 reload 동작
+- Exit: 봇 처리 60초 SLA (SG-AC-1), 침입자 1초 내 추방 (SG-AC-2), graceful drain (SIGTERM 10초 내), SIGHUP 토큰 reload 동작
 
 #### Phase 4 — Admin API + 정책 기반 rate-limit + 감사 검색 (3–5 commits)
 - `/admin/*` 엔드포인트 (사용자 승격, topic 관리, audit 검색)
@@ -611,10 +652,10 @@ type RateLimiter interface {
 
 ### 14.1 기능성 (Spec 상속)
 
-- [ ] `POST /v1/messages/direct` → 200 + `message_id`
-- [ ] `POST /v1/messages/topic` → 200 + `message_id`
-- [ ] `POST /v1/messages/grade-broadcast` → 200, `min_grade > app.grade` 시 403
-- [ ] `POST /v1/messages/broadcast` → 200 (broadcast.all capability 필수)
+- [ ] `POST /v1/messages/direct` → 200 + `message_id` (app_id 필수, 미구독자 → 400 `recipient_not_subscribed`)
+- [ ] `POST /v1/messages/direct-dm` → 200 (admin only, dev/user → 403; `audit_log.delivery_channel='dm'`)
+- [ ] `POST /v1/messages/topic` → 200 + `message_id` (옵션 `min_grade` → effective grade = `max(apps.min_grade, request.min_grade)`)
+- [ ] `POST /v1/messages/broadcast` → 200 (`broadcast.all` capability, 각 사용자 General topic, 옵션 `min_grade`)
 - [ ] `GET /healthz` → 200 with `{status:"ok"}`
 
 ### 14.2 권한 거부
@@ -672,6 +713,17 @@ type RateLimiter interface {
 | **OBS-AC-1** | No-secret-leakage 4개 경로 모두 통과 (malformed/revoked/insufficient-cap/DB-error). |
 | **CI-AC-1** | PR pipeline < 5min (last 5 runs max). |
 | **CI-AC-2** | Main pipeline < 10min (last 5 runs max). |
+
+### 14.10 Post-Spec v6 AC 추가
+
+| AC ID | 설명 |
+|-------|------|
+| **SG-AC-1** | `/start` 4단계 [그룹 만들기] 탭 후 (그룹 생성 + Topics 활성화 + 봇 admin 3종 권한) 부여 시점부터 60초 이내 봇이 `personal_supergroup_chat_id` 저장 + 가입 앱 topics 생성 + "준비 완료" DM 발송. mocktelegram E2E. |
+| **SG-AC-2** | 본인 supergroup에 타인 초대 시 1초 이내 자동 `banChatMember` + `audit_log` `intrusion_kick` 기록. Ban Users 권한 결여 시 사용자 경고 DM + admin alert. |
+| **DM-AC-1** | `POST /v1/messages/direct-dm` admin 호출 200, dev/user 호출 403. `audit_log.delivery_channel='dm'` 기록. capability-matrix YAML에 (direct-dm, admin)=200/(direct-dm, others)=403 포함. |
+| **TOPIC-AC-1** | `POST /v1/messages/topic` 옵션 `min_grade` 적용 시 효과적 grade = `max(apps.min_grade, request.min_grade)`. |
+| **SUB-AC-1** | `/apps` 가입 시 1초 이내 `user_topics` 행 + `createForumTopic` 호출; 탈퇴 시 row 제거 + `closeForumTopic` 호출. mocktelegram이 호출 캡처. |
+| **CAP-AC-2** | `messages.grade-broadcast` capability가 매트릭스 YAML에서 제거됨; 잔존 시 CI 실패. |
 
 ---
 
@@ -795,6 +847,24 @@ type RateLimiter interface {
 
 - 무기한 + rolling 2개 동시 활성
 - `/rotate <app>` 명령으로 관리
+
+### 19.9 v5 → v6 Architecture Pivot (1인 1 Personal Supergroup)
+
+**범위 변경 (driver/principle/Option D 동일, 컴포넌트 #4 내부 구조 + API 표면만 변경):**
+
+- **물리 컨테이너**: grade별 공유 supergroup 3개 → **사용자별 개인 supergroup 1개** (멤버 = user + bot only). 타인 초대 자동 추방.
+- **API 표면**: 4 endpoint → **5 endpoint**. `POST /v1/messages/grade-broadcast` 삭제. `POST /v1/messages/direct-dm` 신설 (admin only). `min_grade`는 `topic`/`broadcast`의 옵션 필터로 흡수.
+- **Capability**: `messages.grade-broadcast`, `topics.manage`, `supergroups.manage` 삭제. `messages.direct.dm` (admin only) 추가.
+- **Topic 가시성**: `topics.required_grade` (등급 기반) → `(users.grade ≥ apps.min_grade) ∧ user_subscriptions(user, app)` 동적 파생.
+- **데이터 모델**: `supergroups`/`topics`/`topic_subscribers`/`subscription_rules` 삭제. `user_topics(user_id, app_id, telegram_topic_id, created_at)` + `pending_supergroup_tokens(token, user_id, expires_at)` 신규. `users` (+`personal_supergroup_chat_id`, `personal_supergroup_linked_at`, `bot_is_admin_in_supergroup`), `apps` (+`min_grade`), `audit_log` (+`delivery_channel`) 확장.
+- **등록 플로우**: §3.4 8단계 재작성 — `/start` → `/agree` → users 행 → [그룹 만들기] startgroup 딥링크 → 사용자가 새 그룹 생성 + 봇 자동 추가 → Topics 활성화 + 봇 admin 3종 권한 (Post Messages + Manage Topics + **Ban Users**) → 봇 자동 link + forum topic 자동 생성 + "준비 완료" DM.
+- **침입자 방어**: 봇이 `chat_member` event에서 비-사용자/비-봇 멤버 감지 시 즉시 `banChatMember` (Ban Users 권한 활용).
+- **Broadcast 대상**: 각 사용자 personal supergroup의 **General topic** (forum 활성화 시 자동 생성됨).
+- **새 AC 6개**: SG-AC-1/2, DM-AC-1, TOPIC-AC-1, SUB-AC-1, CAP-AC-2 (§14.10).
+- **새 Pre-mortem 3건** (plan changelog v6 참조): Ban Users 권한 미부여, 봇 supergroup 추방/제거, 사용자 supergroup 삭제.
+- **영향 안 받음**: telego 단일 인스턴스, Long Polling, Postgres, conversation FSM, 한국법 보관 정책, 다국어, Skills, Docker/GHA/GHCR/SSH 배포, Bot Privacy Mode, Option D 보안 perimeter 우선 전략 — **모두 v5 그대로 유지**.
+
+**재합의 불요**: drivers/principles/Option D 동일. spec §Post-Spec Decisions v6에 잠금. plan v6 changelog에 구현 디테일.
 
 ---
 

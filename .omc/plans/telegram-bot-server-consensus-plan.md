@@ -1,10 +1,10 @@
 # Consensus Plan: Telegram Bot Notification Server
 
-**Status:** **pending approval** (consensus reached — Architect APPROVE, Critic APPROVE-WITH-RESERVATIONS with all 3 named editorial regressions fixed in v4)
+**Status:** **pending approval (v6)** — architectural pivot to 1인 1 personal supergroup integrated; v5 consensus framework retained; scope changes documented in v6 changelog and spec §Post-Spec Decisions v6
 **Spec:** `.omc/specs/deep-interview-telegram-bot-server.md`
 **Mode:** RALPLAN-DR Deliberate (high-risk: auth/security, secrets, CI keys, public API surface)
 **Generated:** 2026-06-21
-**Iteration history:** v1 (REVISE — Architect 15 items, Critic 11 independent + 4 auto-revise conditions) → v2 (Architect APPROVE; Critic REVISE — narrow 5-item editing pass) → v3 (Architect APPROVE — 3 minor residuals; Critic APPROVE-WITH-RESERVATIONS — 3 editorial regressions) → v4 (editorial regressions fixed; consensus reached) → **v5 (this document) — integrates spec §Post-Spec Decisions: 안 B 봇 conversation only, 한국법 기반 보관 정책, 동적 다국어, FSM, 개발자 자가등록. No architectural change; awaiting user execution approval.**
+**Iteration history:** v1 → v2 → v3 → v4 → v5 → **v6 (this document) — applies spec §Post-Spec Decisions v6 (architecture pivot): grade-shared supergroups → personal supergroup per user (member = user + bot only). API 4→5 endpoints (drop `messages.grade-broadcast`, add `messages.direct-dm` admin-only). `min_grade` becomes optional cross-cutting filter on `topic`/`broadcast`. Data model: drop `supergroups`/`topics`/`topic_subscribers`/`subscription_rules`; add `user_topics`; extend `users`/`apps`/`audit_log` columns. New ACs: SG-AC-1/2, DM-AC-1, TOPIC-AC-1, SUB-AC-1, CAP-AC-2. No driver/principle/Option-D change; awaiting user execution approval.**
 
 ---
 
@@ -259,7 +259,7 @@ E2E uses `testcontainers-go` for Postgres + `mocktelegram` stub.
 - `internal/audit/writer.go` — `Write(ctx, event)` with Postgres.
 - `internal/api/handlers/noop.go` — **single no-op handler** `POST /v1/noop` that requires `noop.invoke` capability and emits an audit row. Exists only to exercise the perimeter.
 - **Migration convention (v3 per Critic ind):** golang-migrate paired up/down files. Filenames follow `NNNN_name.up.sql` + `NNNN_name.down.sql`. Phase 7's `dry-run-rollback.sh` depends on down-migrations existing for every up-migration; CI test in Phase 1a asserts that each `*.up.sql` has a matching `*.down.sql`.
-- `migrations/0001_initial.up.sql` / `0001_initial.down.sql` — **full table set per Critic ind #1**: `apps`, `app_capabilities`, `users`, `user_subscriptions`, `supergroups`, `topics`, `topic_subscribers`, `audit_log`, `rate_limit_policies`, `rate_limit_state`, `schema_migrations` (own bookkeeping; managed by golang-migrate).
+- `migrations/0001_initial.up.sql` / `0001_initial.down.sql` — **full table set (v6)**: `apps` (+ `min_grade ENUM('user','developer','admin') NOT NULL`), `app_capabilities`, `app_keys`, `users` (+ `personal_supergroup_chat_id BIGINT NULL`, `personal_supergroup_linked_at TIMESTAMP NULL`, `bot_is_admin_in_supergroup BOOLEAN DEFAULT false`, plus v5 anonymization/lang/status columns), `user_subscriptions`, **`user_topics`** (`user_id`, `app_id`, `telegram_topic_id BIGINT`, `created_at`; PK `(user_id, app_id)`), `pending_supergroup_tokens` (`token TEXT PK`, `user_id`, `expires_at`), `conversation_state`, `pending_grade_requests`, `audit_log` (+ `delivery_channel ENUM('supergroup','dm','general') NULL`), `rate_limit_policies`, `rate_limit_state`, `schema_migrations`. **Dropped from v5**: `supergroups`, `topics`, `topic_subscribers`, `subscription_rules`.
 - `migrations/0002_seed_dev.up.sql` / `0002_seed_dev.down.sql` — **specified per Architect #13**: contains app rows with Argon2 hashes of known cleartexts. Cleartexts recorded in `docs/dev-credentials.md` which is `.gitignore`d. SQL contains zero plaintext credentials.
 - `.gitignore` (v3 per Critic ind #2 — landed in the SAME commit as `0002_seed_dev.up.sql`): adds `docs/dev-credentials.md` and any future credential fixture paths. No commit may merge that introduces `docs/dev-credentials.md` without the matching `.gitignore` entry; enforced by a Phase 6 CI test that fails if `docs/dev-credentials.md` is tracked.
 - `docs/dev-credentials.md` (gitignored) — dev cleartext credential record.
@@ -316,14 +316,15 @@ curl -sf -H 'Authorization: Bearer dev-admin-key' \
 ### Phase 2 — Remaining 3 endpoints + `Hook` chain (3–5 commits)
 
 **Files to create:**
-- `internal/dispatch/strategy/topic.go`
-- `internal/dispatch/strategy/grade_broadcast.go`
-- `internal/dispatch/strategy/broadcast_all.go`
-- `internal/api/handlers/messages_topic.go`
-- `internal/api/handlers/messages_grade_broadcast.go`
-- `internal/api/handlers/messages_broadcast.go`
+- `internal/dispatch/strategy/topic.go` — `app_id` 구독자 중 grade 필터 통과자 해석; `min_grade` 옵션 흡수 (effective = max(apps.min_grade, request.min_grade)).
+- `internal/dispatch/strategy/broadcast_all.go` — 전체 활성 사용자(grade 옵션 필터) → 각 사용자 personal_supergroup의 General topic.
+- `internal/dispatch/strategy/direct_dm.go` (**v6 신규**) — `recipients`로 `users.telegram_id` 직접 해석; 구독·앱·grade 무시; **DM 채널 전용**.
+- `internal/api/handlers/messages_topic.go` — optional `min_grade` 받음.
+- `internal/api/handlers/messages_broadcast.go` — optional `min_grade` 받음.
+- `internal/api/handlers/messages_direct_dm.go` (**v6 신규**) — admin-only (capability `messages.direct.dm`).
+- ~~`internal/dispatch/strategy/grade_broadcast.go`~~ / ~~`internal/api/handlers/messages_grade_broadcast.go`~~ — **v6에서 삭제** (min_grade 흡수).
 - `internal/hook/chain.go` (v2 deferred from Phase 1 per Architect #8) — `Hook` interface with signature `Run(ctx, req) (HookResult, error)`.
-- `internal/hook/builtin/audit_hook.go` — first concrete hook: emits `dispatched` audit row at post-stage. This is the second concrete user that justifies the Hook abstraction (Principle 3).
+- `internal/hook/builtin/audit_hook.go` — first concrete hook: emits `dispatched` audit row at post-stage with `delivery_channel` (`supergroup`/`dm`/`general`). This is the second concrete user that justifies the Hook abstraction (Principle 3).
 
 **Tests:** unit per strategy; integration per endpoint; E2E happy-path for topic, grade-broadcast, and rate-limited broadcast; hook chain unit test.
 
@@ -333,11 +334,15 @@ curl -sf -H 'Authorization: Bearer dev-admin-key' \
 
 **Files to create:**
 - `internal/bot/poller.go` — telego `UpdatesViaLongPolling` lifecycle; **context threaded into update channel** (Pre-mortem #4 mitigation).
-- `internal/bot/handlers/start.go` — `/start` command: registers user with `grade='user'`, triggers `InviteFlow`. Idempotent on re-invocation.
-- `internal/bot/invite.go` — `InviteFlow` orchestrator: resolves matching supergroup for grade, generates invite link via telego, sends DM.
+- `internal/bot/handlers/start.go` — `/start` command FSM: PIPA agree → `users` row + [그룹 만들기] 버튼 (`startgroup` 딥링크 with one-time token). Idempotent on re-invocation (returns supergroup link if already linked).
+- `internal/bot/startgroup.go` (**v6 신규**) — startgroup 토큰 발급(`pending_supergroup_tokens`); `my_chat_member` event에서 봇이 새 그룹에 추가됨 + payload에 토큰 매칭 → `users.personal_supergroup_chat_id` 링크.
+- `internal/bot/intrusion.go` (**v6 신규**) — `chat_member` 리스너; 본인·소유자 외 신규 멤버 감지 시 `banChatMember` 호출 + `audit_log` `intrusion_kick` 행. Ban Users 권한 없으면 사용자에 경고 DM + admin alert.
+- `internal/bot/topic_provisioner.go` (**v6 신규**) — `(user.grade, user_subscriptions)` 기반으로 forum topics 동기화. 가입 → `telego.CreateForumTopic` + `user_topics` 행; 탈퇴 → `telego.CloseForumTopic` (archived 보존) + 행 제거.
+- `internal/bot/handlers/apps.go` (**v6 신규**) — `/apps` FSM: grade 통과 앱 목록 + 가입/탈퇴 토글; topic_provisioner 호출.
 - `internal/registry/user.go` — extend with write paths and idempotent upsert.
-- `internal/registry/subscription.go` — `SubscriptionRule` lookup.
-- `migrations/0003_subscription_rules.up.sql` / `0003_subscription_rules.down.sql` — `subscription_rules` table (this is migration 0003 because 0001 absorbed the bulk of tables and 0002 is seed). (v4 — Critic regression 1 fix: migration convention applied.)
+- `internal/registry/personal_supergroup.go` (**v6 신규**) — `users.personal_supergroup_chat_id`/`linked_at`/`bot_is_admin_in_supergroup` CRUD; 봇 left/kicked 감지 시 `bot_is_admin_in_supergroup=false` + dispatch 차단.
+- `internal/registry/user_topics.go` (**v6 신규**) — `(user_id, app_id) → telegram_topic_id` 매핑 CRUD.
+- ~~`internal/registry/subscription.go`~~ / ~~`migrations/0003_subscription_rules.up.sql`~~ — **v6에서 삭제** (subscription_rules 폐기, `user_subscriptions + apps.min_grade + users.grade`로 파생).
 
 **Tests:** integration with bot harness (mocktelegram-backed); E2E /start flow including 60-second SLA assertion; integration for re-invocation idempotence; **graceful drain E2E** (REL-AC-2 / Pre-mortem #4); **SIGHUP token reload** (Pre-mortem #6).
 
@@ -502,6 +507,15 @@ All 24 spec ACs inherited verbatim. Plan adds (v2 tightened):
 - **REL-AC-2 (v2):** SIGTERM → readiness=0 within 10s with zero in-flight messages dropped. Asserted in graceful-drain E2E.
 - **CAP-AC (v2):** Capability matrix test passes; `testdata/capability-matrix.yaml` defines (endpoint × grade × expected_outcome) and CI asserts conformance. Adding a new capability without updating the YAML fails CI.
 
+### v6 추가 (spec §Post-Spec Decisions v6 잠금)
+
+- **SG-AC-1:** 사용자가 `/start` 4단계 [그룹 만들기] 버튼 → 새 그룹 + 봇 추가 + Topics 활성화 + 봇에 Post Messages/Manage Topics/Ban Users 권한 부여 시점부터 60초 이내, 봇이 `users.personal_supergroup_chat_id` 저장 + 가입 앱 topics 생성 + "준비 완료" DM. 통합 테스트 (mocktelegram이 `my_chat_member` + `CreateForumTopic` 시퀀스 검증).
+- **SG-AC-2:** 사용자 supergroup에 타인 초대 시 봇이 `chat_member` update 수신 후 1초 이내 `banChatMember` + `audit_log` `intrusion_kick` 행. Ban Users 권한 결여 시 사용자에 경고 DM + admin alert.
+- **DM-AC-1:** `POST /v1/messages/direct-dm` admin 호출 시 200; dev/user 호출 시 403. 본문에 `recipients`만(app_id 불필요). 각 recipient의 봇 DM에 메시지 1건. `audit_log.delivery_channel='dm'` 기록. capability matrix YAML에 `(direct-dm, admin)=200`, `(direct-dm, developer)=403`, `(direct-dm, user)=403` 포함.
+- **TOPIC-AC-1:** `POST /v1/messages/topic` body의 옵션 `min_grade` 제공 시 효과적 grade는 `max(apps.min_grade, request.min_grade)`. min_grade 미제공 시 `apps.min_grade`만 적용. 통합 테스트.
+- **SUB-AC-1:** `/apps`에서 가입 시 `user_topics`에 새 telegram_topic_id가 1초 이내 삽입되고 그 토픽이 personal_supergroup에 실제 생성됨 (mocktelegram이 `createForumTopic` 호출 캡처). 탈퇴 시 행 제거 + `closeForumTopic` 호출.
+- **CAP-AC-2:** `messages.grade-broadcast` capability가 매트릭스 YAML에서 **제거**됨. 매트릭스에 `grade-broadcast` 엔드포인트 row가 있으면 CI 실패 (역방향 sanity check).
+
 ---
 
 ## Risks and Mitigations
@@ -642,3 +656,24 @@ All commands assume cwd = repo root, `make` installed, Docker running.
   - **Bot username**: TBD — operator creates via BotFather, sets env var `TELEGRAM_BOT_USERNAME`, Phase 1a config reads and validates non-empty at startup.
   - **Privacy mode**: BotFather setting `Privacy mode: ENABLED` (default) — covered in `docs/deployment.md` operator pre-flight checklist.
   - **No re-consensus required**: changes are scope-additive (no new components, no driver changes, no principle changes). v4 consensus stands; v5 integrates spec extension and updates AC list.
+- **v6 (architecture pivot — 1인 1 personal supergroup):**
+  - **Source:** spec §Post-Spec Decisions v6. v5 consensus framework (Option D, drivers, principles) **retained unchanged**; v6 changes scope/topology of component #4 only, plus the routing surface.
+  - **Topology**: grade별 공유 supergroup 3개 → 사용자별 개인 supergroup 1개 (멤버 = user + bot only). 타인 초대 비허용 (Ban Users 권한 활용 자동 추방).
+  - **API surface**: 4 → 5 endpoints. Drop `POST /v1/messages/grade-broadcast`. Add `POST /v1/messages/direct-dm` (admin-only). `min_grade` becomes optional filter on `topic` and `broadcast`.
+  - **Capabilities**: drop `messages.grade-broadcast`. Add `messages.direct.dm` (admin only — DM은 구독·grade 우회 강제 push).
+  - **Data model**: drop `supergroups`, `topics`, `topic_subscribers`, `subscription_rules`. Add `user_topics(user_id, app_id, telegram_topic_id, created_at)`, `pending_supergroup_tokens(token, user_id, expires_at)`. Extend `users` (+`personal_supergroup_chat_id`, `personal_supergroup_linked_at`, `bot_is_admin_in_supergroup`). Extend `apps` (+`min_grade`). Extend `audit_log` (+`delivery_channel`).
+  - **Topic visibility**: 동적 파생 — `(users.grade ≥ apps.min_grade) ∧ user_subscriptions(user, app)`. `topic_subscribers`/`subscription_rules` 폐기.
+  - **Registration flow**: 8-step. (1) `/start` → (2) PIPA + `/agree` → (3) users 행 생성 → (4) [그룹 만들기] 버튼 (`t.me/<bot>?startgroup=<one_time_token>`) → (5) Telegram "그룹 추가" 다이얼로그 → 새 그룹 생성 → 봇 자동 추가 → (6) Topics 활성화 → (7) 봇 Promote (Post Messages + Manage Topics + Ban Users) → (8) 봇이 my_chat_member 매칭 → personal_supergroup_chat_id 저장 + forum topic 자동 생성 + 완료 DM. SLA 60초 (봇 처리 시간만).
+  - **Files added in Phase 3**: `internal/bot/startgroup.go`, `internal/bot/intrusion.go`, `internal/bot/topic_provisioner.go`, `internal/bot/handlers/apps.go`, `internal/registry/personal_supergroup.go`, `internal/registry/user_topics.go`. **Removed**: `internal/bot/invite.go`, `internal/registry/subscription.go`, `migrations/0003_subscription_rules.*`.
+  - **Files added in Phase 2**: `internal/dispatch/strategy/direct_dm.go`, `internal/api/handlers/messages_direct_dm.go`. **Removed**: `internal/dispatch/strategy/grade_broadcast.go`, `internal/api/handlers/messages_grade_broadcast.go`.
+  - **Phase 1a migration 0001**: 전체 테이블 셋 재정의 — supergroups/topics/topic_subscribers/subscription_rules 제거, user_topics + pending_supergroup_tokens 추가, users/apps/audit_log 컬럼 확장.
+  - **Capability matrix YAML**: 새 엔드포인트 5개 row, `(direct-dm, admin)=200`/`(direct-dm, others)=403`, `min_grade` 통과 시나리오 추가. grade-broadcast row 제거.
+  - **New ACs**: SG-AC-1, SG-AC-2, DM-AC-1, TOPIC-AC-1, SUB-AC-1, CAP-AC-2 (Acceptance Criteria 섹션 참조).
+  - **New Pre-mortem scenarios**:
+    - **Scenario 8 (v6):** 사용자가 Ban Users 권한 부여 안 함 → 침입자 추방 불가. 완화책: 봇이 권한 부재 감지 시 사용자 DM 경고 + admin alert; 그래도 미해결 시 audit_log `intrusion_unmitigated` 행 + 사용자 supergroup의 모든 delivery 일시 정지 (사용자 측에서 권한 부여 후 재개).
+    - **Scenario 9 (v6):** 봇이 사용자 supergroup에서 추방/제거됨 (사용자 실수 또는 의도) → `user_topics` 무효, dispatch 실패. 완화책: `my_chat_member` `left`/`kicked` 이벤트 감지 → `bot_is_admin_in_supergroup=false` 마킹 + 해당 사용자에게 dispatch 차단 + 사용자 DM 알림 ("/start로 재설정 가능"). 재가입 시 personal_supergroup_chat_id NULL로 초기화 후 처음부터.
+    - **Scenario 10 (v6):** 사용자가 자신의 personal_supergroup을 삭제 → telegram_chat_id 무효. 동일 처리 (#9와 합쳐서 처리).
+  - **Risks added**:
+    - "사용자가 Ban Users 권한 부여 거부" — Medium severity — 위 Scenario 8 완화책 + docs/runbook.md에 운영자 가이드.
+    - "Broadcast 비용 N배" — Low severity — Telegram global rate-limit이 동일하므로 throughput은 변하지 않음; REL-AC-1 (33s ≤ T ≤ 60s for 1000 recipients) 그대로 유효.
+  - **No re-consensus required**: drivers/principles/Option D 동일. 컴포넌트 #4의 내부 구조와 API 표면만 변경. v5 consensus stands; v6는 spec 확장 + 구현 디테일 반영.
