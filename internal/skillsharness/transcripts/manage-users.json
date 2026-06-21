@@ -7,7 +7,7 @@
   "http_calls": [
     {
       "method": "PATCH",
-      "path": "/admin/users/1",
+      "path": "/admin/users/100000044",
       "body": {
         "grade": "developer"
       },
@@ -16,7 +16,7 @@
     },
     {
       "method": "POST",
-      "path": "/admin/users/1/subscriptions/deploy-alerts",
+      "path": "/admin/users/100000044/subscriptions/deploy-alerts",
       "body": {},
       "expected_status": 200,
       "assert_body_contains": ["\"subscribed\""]

@@ -29,8 +29,17 @@ type Transcript struct {
 	Skill                     string            `json:"skill"`
 	Description               string            `json:"description"`
 	Env                       map[string]string `json:"env"`
+	CleanupPaths              []CleanupCall     `json:"cleanup_paths,omitempty"`
 	HTTPCalls                 []HTTPCall        `json:"http_calls"`
 	ExpectedMocktelegramCalls []MockCall        `json:"expected_mocktelegram_calls"`
+}
+
+// CleanupCall is a best-effort pre-test request whose failure is ignored.
+// It exists so transcripts can be re-run against a long-lived stack without
+// hard-resetting state — e.g. DELETE an app that may or may not exist.
+type CleanupCall struct {
+	Method string `json:"method"`
+	Path   string `json:"path"`
 }
 
 // HTTPCall describes one request to replay against the server.
@@ -91,6 +100,34 @@ func runFixtureWithMock(ctx context.Context, tr Transcript, serverURL, mockteleg
 	client := &http.Client{}
 
 	apiKey := tr.Env["TELEGRAM_API_KEY"]
+
+	// Best-effort cleanup. Failures (including non-2xx responses) are
+	// intentionally ignored so a fresh run against an empty DB still works.
+	for _, c := range tr.CleanupPaths {
+		req, err := http.NewRequestWithContext(ctx, c.Method, serverURL+c.Path, nil)
+		if err != nil {
+			continue
+		}
+		if apiKey != "" {
+			req.Header.Set("Authorization", "Bearer "+apiKey)
+		}
+		resp, err := client.Do(req)
+		if err == nil {
+			resp.Body.Close()
+		}
+	}
+
+	// Reset mocktelegram recorded calls so MinCount assertions reflect only
+	// this transcript's side-effects. Failure is non-fatal — older
+	// mocktelegram builds may not implement /test/reset.
+	if mocktelegramURL != "" {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, mocktelegramURL+"/test/reset", nil)
+		if err == nil {
+			if resp, _ := client.Do(req); resp != nil {
+				resp.Body.Close()
+			}
+		}
+	}
 
 	for i, call := range tr.HTTPCalls {
 		url := serverURL + call.Path

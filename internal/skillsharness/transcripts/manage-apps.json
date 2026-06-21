@@ -4,6 +4,9 @@
   "env": {
     "TELEGRAM_API_KEY": "tg_devadmin_0123456789abcdef0123456789abcdef"
   },
+  "cleanup_paths": [
+    {"method": "DELETE", "path": "/admin/apps/phase5-lifecycle-app"}
+  ],
   "http_calls": [
     {
       "method": "POST",

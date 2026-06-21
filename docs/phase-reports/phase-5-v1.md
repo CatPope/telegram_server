@@ -2,17 +2,27 @@
 phase: 5
 version: 1
 status: success
-commits: ["dea09da"]
+commits: ["dea09da", "bf41316", "<pending-fix>"]
 opened: "2026-06-22T00:00:00Z"
 closed: "2026-06-22T00:00:00Z"
-fix_rounds: 0
-deferred_tasks: ["phase6-live-mode-claude-cli", "phase6-rate-limit-policy-write", "phase7-key-rotation"]
+fix_rounds: 1
+deferred_tasks: ["phase6-live-mode-claude-cli", "phase6-rate-limit-policy-write", "phase7-key-rotation", "phase7-hard-delete-admin-endpoint"]
 next_phase: 6
 ---
 
 ## Summary
 
-Phase 5 ships the skills bundle: 5 Anthropic-standard SKILL.md documents + POSIX bash helpers + a Go fixture harness (`internal/skillsharness`) with localhost guard. All 21 files committed and pushed in a single pass; `go build ./... && go vet ./... && go test -count=1 ./...` pass clean.
+Phase 5 ships the skills bundle: 5 Anthropic-standard SKILL.md documents + POSIX bash helpers + a Go fixture harness (`internal/skillsharness`) with localhost guard. All 21 files committed and pushed in a single pass; `go build ./... && go vet ./... && go test -count=1 ./...` pass clean. Fix round 1 then added live-mode E2E verification against docker compose: 11/11 tests pass (5 fixture + 5 localhost guard + 1 live-skip stub).
+
+## Fix Round 1
+
+Live harness runs surfaced 3 issues; all fixed in one round:
+
+1. **mocktelegram introspection** — Container needed rebuild after Phase 5 added `GET /test/calls` + `POST /test/reset`. Once rebuilt, `/test/calls` returns the recorded calls as JSON; `/test/reset` clears them.
+2. **`manage-users.json` transcript** — Used `telegram_id=1` but no fixture user has that id; real seed data has `100000042..45`. Changed to `100000044` (grade=user, no deploy-alerts subscription — both promote and subscribe paths exercise distinct rows).
+3. **Harness `cleanup_paths` + auto-reset** — Added a `CleanupPaths []CleanupCall` field to `Transcript` so re-runs can best-effort DELETE leftover resources. Harness also auto-POSTs `/test/reset` on mocktelegram before each transcript so MinCount assertions reflect only this run's side-effects.
+
+After fix: clean DB run = 11/11 PASS. Note: register-app/manage-apps re-runs against a long-running stack still fail with 409 because admin DELETE is soft-only (active=false; PK row retained). A hard-delete admin endpoint is tracked as `phase7-hard-delete-admin-endpoint` in deferred tasks; standard CI pattern is fresh service container per run, so this does not block Phase 6.
 
 ## Deliverables
 
