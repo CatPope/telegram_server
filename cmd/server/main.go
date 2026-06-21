@@ -47,7 +47,11 @@ func main() {
 
 	auditW := audit.NewPgWriter(pool)
 	keyStore := auth.NewKeyStore(pool)
-	reqLimit := ratelimit.NewRequestLimiter(ratelimit.Policy{RatePerSec: 100, Burst: 100}, nil)
+	policyLoader := ratelimit.NewPolicyLoader(pool, "request")
+	reqLimit, err := policyLoader.BuildRequestLimiter(ctx, ratelimit.Policy{RatePerSec: 100, Burst: 100})
+	if err != nil {
+		log.Fatalf("ratelimit policies: %v", err)
+	}
 
 	botOpts := []telego.BotOption{}
 	if cfg.TelegramAPIURL != "" {

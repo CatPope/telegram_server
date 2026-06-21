@@ -42,21 +42,33 @@ func (s *KeyStore) Resolve(ctx context.Context, bearer string) (RequesterIdentit
 	if err != nil {
 		return RequesterIdentity{}, err
 	}
+
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{
+		AccessMode: pgx.ReadOnly,
+		IsoLevel:   pgx.RepeatableRead,
+	})
+	if err != nil {
+		return RequesterIdentity{}, fmt.Errorf("auth: begin: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
 	const q = `
-		SELECT k.app_id, k.key_hash
+		SELECT k.app_id, k.key_hash, a.capability_set_version
 		FROM app_keys k
 		JOIN apps a ON a.id = k.app_id
 		WHERE k.key_prefix = $1 AND k.revoked_at IS NULL AND a.active = true`
-	rows, err := s.pool.Query(ctx, q, prefix)
+	rows, err := tx.Query(ctx, q, prefix)
 	if err != nil {
 		return RequesterIdentity{}, fmt.Errorf("auth: query key: %w", err)
 	}
 	defer rows.Close()
-	var appID, hash string
+	var appID string
+	var capVer int64
 	matched := false
 	for rows.Next() {
 		var rowAppID, rowHash string
-		if scanErr := rows.Scan(&rowAppID, &rowHash); scanErr != nil {
+		var rowCapVer int64
+		if scanErr := rows.Scan(&rowAppID, &rowHash, &rowCapVer); scanErr != nil {
 			return RequesterIdentity{}, fmt.Errorf("auth: scan: %w", scanErr)
 		}
 		ok, vErr := VerifyAPIKey(bearer, rowHash)
@@ -65,7 +77,7 @@ func (s *KeyStore) Resolve(ctx context.Context, bearer string) (RequesterIdentit
 		}
 		if ok {
 			appID = rowAppID
-			hash = rowHash
+			capVer = rowCapVer
 			matched = true
 			break
 		}
@@ -73,23 +85,29 @@ func (s *KeyStore) Resolve(ctx context.Context, bearer string) (RequesterIdentit
 	if err := rows.Err(); err != nil {
 		return RequesterIdentity{}, fmt.Errorf("auth: rows: %w", err)
 	}
+	// pgx allows only one active query per tx. Close the key-lookup cursor
+	// before starting the capability-load query on the same tx.
+	rows.Close()
 	if !matched {
 		return RequesterIdentity{}, ErrKeyNotFound
 	}
-	caps, err := s.loadCapabilities(ctx, appID)
+	caps, err := loadCapabilitiesTx(ctx, tx, appID)
 	if err != nil {
 		return RequesterIdentity{}, err
 	}
-	_ = hash
+	if err := tx.Commit(ctx); err != nil {
+		return RequesterIdentity{}, fmt.Errorf("auth: commit: %w", err)
+	}
 	return RequesterIdentity{
-		AppID:        appID,
-		Capabilities: caps,
-		KeyPrefix:    prefix,
+		AppID:            appID,
+		Capabilities:     caps,
+		CapabilitySetVer: capVer,
+		KeyPrefix:        prefix,
 	}, nil
 }
 
-func (s *KeyStore) loadCapabilities(ctx context.Context, appID string) (CapabilitySet, error) {
-	rows, err := s.pool.Query(ctx, `SELECT capability FROM app_capabilities WHERE app_id = $1`, appID)
+func loadCapabilitiesTx(ctx context.Context, tx pgx.Tx, appID string) (CapabilitySet, error) {
+	rows, err := tx.Query(ctx, `SELECT capability FROM app_capabilities WHERE app_id = $1`, appID)
 	if err != nil {
 		return nil, fmt.Errorf("auth: query caps: %w", err)
 	}
@@ -107,5 +125,3 @@ func (s *KeyStore) loadCapabilities(ctx context.Context, appID string) (Capabili
 	}
 	return set, nil
 }
-
-var _ = pgx.ErrNoRows

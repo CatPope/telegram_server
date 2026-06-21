@@ -65,16 +65,31 @@ func runStrategyDispatch(
 
 	denyAndWriteAudit := func(code string, status int) {
 		_ = writeAuditSafe(r, auditW, audit.Event{
-			TraceID:       trace,
-			MessageID:     messageID,
-			Stage:         audit.StageDenied,
-			Endpoint:      endpoint,
-			AppID:         id.AppID,
-			Capability:    string(cap),
-			RouteStrategy: stratName,
-			ErrorCode:     code,
+			TraceID:          trace,
+			MessageID:        messageID,
+			Stage:            audit.StageDenied,
+			Endpoint:         endpoint,
+			AppID:            id.AppID,
+			Capability:       string(cap),
+			CapabilitySetVer: id.CapabilitySetVer,
+			RouteStrategy:    stratName,
+			ErrorCode:        code,
 		})
 		writeError(w, status, code)
+	}
+
+	if err := writeAuditSafe(r, auditW, audit.Event{
+		TraceID:          trace,
+		MessageID:        messageID,
+		Stage:            audit.StageReceived,
+		Endpoint:         endpoint,
+		AppID:            id.AppID,
+		Capability:       string(cap),
+		CapabilitySetVer: id.CapabilitySetVer,
+		RouteStrategy:    stratName,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "audit_unavailable")
+		return
 	}
 
 	var req dispatchRequest
@@ -82,19 +97,6 @@ func runStrategyDispatch(
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
 		denyAndWriteAudit("malformed_json", http.StatusBadRequest)
-		return
-	}
-
-	if err := writeAuditSafe(r, auditW, audit.Event{
-		TraceID:       trace,
-		MessageID:     messageID,
-		Stage:         audit.StageReceived,
-		Endpoint:      endpoint,
-		AppID:         id.AppID,
-		Capability:    string(cap),
-		RouteStrategy: stratName,
-	}); err != nil {
-		writeError(w, http.StatusInternalServerError, "audit_unavailable")
 		return
 	}
 
@@ -144,13 +146,14 @@ func runStrategyDispatch(
 	}
 
 	if err := writeAuditSafe(r, auditW, audit.Event{
-		TraceID:       trace,
-		MessageID:     messageID,
-		Stage:         audit.StageValidated,
-		Endpoint:      endpoint,
-		AppID:         id.AppID,
-		Capability:    string(cap),
-		RouteStrategy: stratName,
+		TraceID:          trace,
+		MessageID:        messageID,
+		Stage:            audit.StageValidated,
+		Endpoint:         endpoint,
+		AppID:            id.AppID,
+		Capability:       string(cap),
+		CapabilitySetVer: id.CapabilitySetVer,
+		RouteStrategy:    stratName,
 		Details: map[string]any{
 			"recipients_requested": len(req.Recipients),
 			"recipients_resolved":  len(resolved.Recipients),
@@ -165,32 +168,34 @@ func runStrategyDispatch(
 	for _, rh := range resolved.Recipients {
 		channel := audit.DeliveryChannel(rh.Channel)
 		_ = writeAuditSafe(r, auditW, audit.Event{
-			TraceID:         trace,
-			MessageID:       messageID,
-			Stage:           audit.StageDispatched,
-			Endpoint:        endpoint,
-			AppID:           id.AppID,
-			Capability:      string(cap),
-			RouteStrategy:   stratName,
-			DeliveryChannel: channel,
-			RecipientUserID: rh.UserID,
-			RecipientChatID: rh.ChatID,
+			TraceID:          trace,
+			MessageID:        messageID,
+			Stage:            audit.StageDispatched,
+			Endpoint:         endpoint,
+			AppID:            id.AppID,
+			Capability:       string(cap),
+			CapabilitySetVer: id.CapabilitySetVer,
+			RouteStrategy:    stratName,
+			DeliveryChannel:  channel,
+			RecipientUserID:  rh.UserID,
+			RecipientChatID:  rh.ChatID,
 		})
 		result, sendErr := disp.Send(r.Context(), rh, req.Envelope)
 		if sendErr != nil {
 			code := classifyDispatchErr(sendErr)
 			_ = writeAuditSafe(r, auditW, audit.Event{
-				TraceID:         trace,
-				MessageID:       messageID,
-				Stage:           audit.StageDeferred,
-				Endpoint:        endpoint,
-				AppID:           id.AppID,
-				Capability:      string(cap),
-				RouteStrategy:   stratName,
-				DeliveryChannel: channel,
-				RecipientUserID: rh.UserID,
-				RecipientChatID: rh.ChatID,
-				ErrorCode:       code,
+				TraceID:          trace,
+				MessageID:        messageID,
+				Stage:            audit.StageDeferred,
+				Endpoint:         endpoint,
+				AppID:            id.AppID,
+				Capability:       string(cap),
+				CapabilitySetVer: id.CapabilitySetVer,
+				RouteStrategy:    stratName,
+				DeliveryChannel:  channel,
+				RecipientUserID:  rh.UserID,
+				RecipientChatID:  rh.ChatID,
+				ErrorCode:        code,
 			})
 			resp.Failed++
 			resp.Recipients = append(resp.Recipients, dispatchReport{
@@ -199,16 +204,17 @@ func runStrategyDispatch(
 			continue
 		}
 		_ = writeAuditSafe(r, auditW, audit.Event{
-			TraceID:         trace,
-			MessageID:       messageID,
-			Stage:           audit.StageDelivered,
-			Endpoint:        endpoint,
-			AppID:           id.AppID,
-			Capability:      string(cap),
-			RouteStrategy:   stratName,
-			DeliveryChannel: channel,
-			RecipientUserID: rh.UserID,
-			RecipientChatID: rh.ChatID,
+			TraceID:          trace,
+			MessageID:        messageID,
+			Stage:            audit.StageDelivered,
+			Endpoint:         endpoint,
+			AppID:            id.AppID,
+			Capability:       string(cap),
+			CapabilitySetVer: id.CapabilitySetVer,
+			RouteStrategy:    stratName,
+			DeliveryChannel:  channel,
+			RecipientUserID:  rh.UserID,
+			RecipientChatID:  rh.ChatID,
 		})
 		resp.Delivered++
 		resp.Recipients = append(resp.Recipients, dispatchReport{
@@ -217,16 +223,17 @@ func runStrategyDispatch(
 	}
 	for _, sk := range resolved.Skipped {
 		_ = writeAuditSafe(r, auditW, audit.Event{
-			TraceID:         trace,
-			MessageID:       messageID,
-			Stage:           audit.StageDenied,
-			Endpoint:        endpoint,
-			AppID:           id.AppID,
-			Capability:      string(cap),
-			RouteStrategy:   stratName,
-			DeliveryChannel: opts.DefaultChannel,
-			RecipientUserID: sk.UserID,
-			ErrorCode:       sk.Code,
+			TraceID:          trace,
+			MessageID:        messageID,
+			Stage:            audit.StageDenied,
+			Endpoint:         endpoint,
+			AppID:            id.AppID,
+			Capability:       string(cap),
+			CapabilitySetVer: id.CapabilitySetVer,
+			RouteStrategy:    stratName,
+			DeliveryChannel:  opts.DefaultChannel,
+			RecipientUserID:  sk.UserID,
+			ErrorCode:        sk.Code,
 		})
 		resp.Skipped++
 		resp.Recipients = append(resp.Recipients, dispatchReport{

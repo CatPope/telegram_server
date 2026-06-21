@@ -46,49 +46,51 @@ func (h *DirectHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	trace := middleware.TraceID(r.Context())
 	messageID := uuid.NewString()
 
-	var req directRequest
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil {
-		h.writeAuditDenied(r, id.AppID, messageID, trace, "malformed_json")
-		writeError(w, http.StatusBadRequest, "malformed_json")
-		return
-	}
 	if err := h.writeAudit(r, audit.Event{
-		TraceID:    trace,
-		MessageID:  messageID,
-		Stage:      audit.StageReceived,
-		Endpoint:   r.URL.Path,
-		AppID:      id.AppID,
-		Capability: string(auth.CapMessagesDirect),
-		RouteStrategy: h.Strategy.Name(),
+		TraceID:          trace,
+		MessageID:        messageID,
+		Stage:            audit.StageReceived,
+		Endpoint:         r.URL.Path,
+		AppID:            id.AppID,
+		Capability:       string(auth.CapMessagesDirect),
+		CapabilitySetVer: id.CapabilitySetVer,
+		RouteStrategy:    h.Strategy.Name(),
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "audit_unavailable")
 		return
 	}
 
+	var req directRequest
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		h.writeAuditDenied(r, id, messageID, trace, "malformed_json")
+		writeError(w, http.StatusBadRequest, "malformed_json")
+		return
+	}
+
 	if req.Envelope.SchemaVersion == 0 {
-		h.writeAuditDenied(r, id.AppID, messageID, trace, "missing_envelope_version")
+		h.writeAuditDenied(r, id, messageID, trace, "missing_envelope_version")
 		writeError(w, http.StatusBadRequest, "missing_envelope_version")
 		return
 	}
 	if req.Envelope.SchemaVersion != 1 {
-		h.writeAuditDenied(r, id.AppID, messageID, trace, "unsupported_envelope_version")
+		h.writeAuditDenied(r, id, messageID, trace, "unsupported_envelope_version")
 		writeError(w, http.StatusBadRequest, "unsupported_envelope_version")
 		return
 	}
 	if req.Envelope.Text == "" {
-		h.writeAuditDenied(r, id.AppID, messageID, trace, "empty_envelope_text")
+		h.writeAuditDenied(r, id, messageID, trace, "empty_envelope_text")
 		writeError(w, http.StatusBadRequest, "empty_envelope_text")
 		return
 	}
 	if req.AppID == "" {
-		h.writeAuditDenied(r, id.AppID, messageID, trace, "missing_app_id")
+		h.writeAuditDenied(r, id, messageID, trace, "missing_app_id")
 		writeError(w, http.StatusBadRequest, "missing_app_id")
 		return
 	}
 	if len(req.Recipients) == 0 {
-		h.writeAuditDenied(r, id.AppID, messageID, trace, "empty_recipients")
+		h.writeAuditDenied(r, id, messageID, trace, "empty_recipients")
 		writeError(w, http.StatusBadRequest, "empty_recipients")
 		return
 	}
@@ -109,19 +111,20 @@ func (h *DirectHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			code = "empty_recipients"
 			status = http.StatusBadRequest
 		}
-		h.writeAuditDenied(r, id.AppID, messageID, trace, code)
+		h.writeAuditDenied(r, id, messageID, trace, code)
 		writeError(w, status, code)
 		return
 	}
 
 	if err := h.writeAudit(r, audit.Event{
-		TraceID:       trace,
-		MessageID:     messageID,
-		Stage:         audit.StageValidated,
-		Endpoint:      r.URL.Path,
-		AppID:         id.AppID,
-		Capability:    string(auth.CapMessagesDirect),
-		RouteStrategy: h.Strategy.Name(),
+		TraceID:          trace,
+		MessageID:        messageID,
+		Stage:            audit.StageValidated,
+		Endpoint:         r.URL.Path,
+		AppID:            id.AppID,
+		Capability:       string(auth.CapMessagesDirect),
+		CapabilitySetVer: id.CapabilitySetVer,
+		RouteStrategy:    h.Strategy.Name(),
 		Details: map[string]any{
 			"recipients_requested": len(req.Recipients),
 			"recipients_resolved":  len(resolved.Recipients),
@@ -138,32 +141,34 @@ func (h *DirectHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	for _, rh := range resolved.Recipients {
 		_ = h.writeAudit(r, audit.Event{
-			TraceID:         trace,
-			MessageID:       messageID,
-			Stage:           audit.StageDispatched,
-			Endpoint:        r.URL.Path,
-			AppID:           id.AppID,
-			Capability:      string(auth.CapMessagesDirect),
-			RouteStrategy:   h.Strategy.Name(),
-			DeliveryChannel: audit.ChannelSupergroup,
-			RecipientUserID: rh.UserID,
-			RecipientChatID: rh.ChatID,
+			TraceID:          trace,
+			MessageID:        messageID,
+			Stage:            audit.StageDispatched,
+			Endpoint:         r.URL.Path,
+			AppID:            id.AppID,
+			Capability:       string(auth.CapMessagesDirect),
+			CapabilitySetVer: id.CapabilitySetVer,
+			RouteStrategy:    h.Strategy.Name(),
+			DeliveryChannel:  audit.ChannelSupergroup,
+			RecipientUserID:  rh.UserID,
+			RecipientChatID:  rh.ChatID,
 		})
 		result, sendErr := h.Dispatcher.Send(r.Context(), rh, req.Envelope)
 		if sendErr != nil {
 			code := classifyDispatchErr(sendErr)
 			_ = h.writeAudit(r, audit.Event{
-				TraceID:         trace,
-				MessageID:       messageID,
-				Stage:           audit.StageDeferred,
-				Endpoint:        r.URL.Path,
-				AppID:           id.AppID,
-				Capability:      string(auth.CapMessagesDirect),
-				RouteStrategy:   h.Strategy.Name(),
-				DeliveryChannel: audit.ChannelSupergroup,
-				RecipientUserID: rh.UserID,
-				RecipientChatID: rh.ChatID,
-				ErrorCode:       code,
+				TraceID:          trace,
+				MessageID:        messageID,
+				Stage:            audit.StageDeferred,
+				Endpoint:         r.URL.Path,
+				AppID:            id.AppID,
+				Capability:       string(auth.CapMessagesDirect),
+				CapabilitySetVer: id.CapabilitySetVer,
+				RouteStrategy:    h.Strategy.Name(),
+				DeliveryChannel:  audit.ChannelSupergroup,
+				RecipientUserID:  rh.UserID,
+				RecipientChatID:  rh.ChatID,
+				ErrorCode:        code,
 			})
 			resp.Failed++
 			resp.Recipients = append(resp.Recipients, recipientReport{
@@ -172,16 +177,17 @@ func (h *DirectHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		_ = h.writeAudit(r, audit.Event{
-			TraceID:         trace,
-			MessageID:       messageID,
-			Stage:           audit.StageDelivered,
-			Endpoint:        r.URL.Path,
-			AppID:           id.AppID,
-			Capability:      string(auth.CapMessagesDirect),
-			RouteStrategy:   h.Strategy.Name(),
-			DeliveryChannel: audit.ChannelSupergroup,
-			RecipientUserID: rh.UserID,
-			RecipientChatID: rh.ChatID,
+			TraceID:          trace,
+			MessageID:        messageID,
+			Stage:            audit.StageDelivered,
+			Endpoint:         r.URL.Path,
+			AppID:            id.AppID,
+			Capability:       string(auth.CapMessagesDirect),
+			CapabilitySetVer: id.CapabilitySetVer,
+			RouteStrategy:    h.Strategy.Name(),
+			DeliveryChannel:  audit.ChannelSupergroup,
+			RecipientUserID:  rh.UserID,
+			RecipientChatID:  rh.ChatID,
 		})
 		resp.Delivered++
 		resp.Recipients = append(resp.Recipients, recipientReport{
@@ -190,15 +196,16 @@ func (h *DirectHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, sk := range resolved.Skipped {
 		_ = h.writeAudit(r, audit.Event{
-			TraceID:         trace,
-			MessageID:       messageID,
-			Stage:           audit.StageDenied,
-			Endpoint:        r.URL.Path,
-			AppID:           id.AppID,
-			Capability:      string(auth.CapMessagesDirect),
-			RouteStrategy:   h.Strategy.Name(),
-			RecipientUserID: sk.UserID,
-			ErrorCode:       sk.Code,
+			TraceID:          trace,
+			MessageID:        messageID,
+			Stage:            audit.StageDenied,
+			Endpoint:         r.URL.Path,
+			AppID:            id.AppID,
+			Capability:       string(auth.CapMessagesDirect),
+			CapabilitySetVer: id.CapabilitySetVer,
+			RouteStrategy:    h.Strategy.Name(),
+			RecipientUserID:  sk.UserID,
+			ErrorCode:        sk.Code,
 		})
 		resp.Skipped++
 		resp.Recipients = append(resp.Recipients, recipientReport{
@@ -241,16 +248,17 @@ func (h *DirectHandler) writeAudit(r *http.Request, e audit.Event) error {
 	return err
 }
 
-func (h *DirectHandler) writeAuditDenied(r *http.Request, appID, messageID, trace, code string) {
+func (h *DirectHandler) writeAuditDenied(r *http.Request, requester auth.RequesterIdentity, messageID, trace, code string) {
 	_ = h.writeAudit(r, audit.Event{
-		TraceID:       trace,
-		MessageID:     messageID,
-		Stage:         audit.StageDenied,
-		Endpoint:      r.URL.Path,
-		AppID:         appID,
-		Capability:    string(auth.CapMessagesDirect),
-		RouteStrategy: h.Strategy.Name(),
-		ErrorCode:     code,
+		TraceID:          trace,
+		MessageID:        messageID,
+		Stage:            audit.StageDenied,
+		Endpoint:         r.URL.Path,
+		AppID:            requester.AppID,
+		Capability:       string(auth.CapMessagesDirect),
+		CapabilitySetVer: requester.CapabilitySetVer,
+		RouteStrategy:    h.Strategy.Name(),
+		ErrorCode:        code,
 	})
 }
 

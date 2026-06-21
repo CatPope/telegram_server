@@ -1,0 +1,3 @@
+BEGIN;
+ALTER TABLE apps ADD COLUMN capability_set_version BIGINT NOT NULL DEFAULT 1;
+COMMIT;

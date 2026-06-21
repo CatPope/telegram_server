@@ -39,6 +39,30 @@ func NewRouter(d Deps) http.Handler {
 
 	r.Get("/healthz", (&handlers.HealthHandler{Pool: d.Pool}).ServeHTTP)
 
+	r.Route("/admin", func(r chi.Router) {
+		r.Use(chimw.Timeout(HandlerTimeout))
+		r.Use(middleware.Auth(d.Resolver, d.Audit))
+		r.Use(middleware.RateLimit(d.ReqLimit))
+
+		r.With(middleware.RequireCapability(auth.CapAppsRegister, d.Audit)).
+			Method(http.MethodPost, "/apps", http.HandlerFunc((&handlers.AdminAppsHandler{Pool: d.Pool, Audit: d.Audit}).Create))
+		r.With(middleware.RequireCapability(auth.CapAppsRegister, d.Audit)).
+			Method(http.MethodPatch, "/apps/{id}", http.HandlerFunc((&handlers.AdminAppsHandler{Pool: d.Pool, Audit: d.Audit}).Patch))
+		r.With(middleware.RequireCapability(auth.CapAppsRegister, d.Audit)).
+			Method(http.MethodDelete, "/apps/{id}", http.HandlerFunc((&handlers.AdminAppsHandler{Pool: d.Pool, Audit: d.Audit}).Delete))
+
+		r.With(middleware.RequireCapability(auth.CapUsersPromote, d.Audit)).
+			Method(http.MethodPatch, "/users/{telegram_id}", http.HandlerFunc((&handlers.AdminUsersHandler{Pool: d.Pool, Audit: d.Audit}).Patch))
+
+		r.With(middleware.RequireCapability(auth.CapAppsRegister, d.Audit)).
+			Method(http.MethodPost, "/users/{telegram_id}/subscriptions/{app_id}", http.HandlerFunc((&handlers.AdminSubscriptionsHandler{Pool: d.Pool, Audit: d.Audit}).Subscribe))
+		r.With(middleware.RequireCapability(auth.CapAppsRegister, d.Audit)).
+			Method(http.MethodDelete, "/users/{telegram_id}/subscriptions/{app_id}", http.HandlerFunc((&handlers.AdminSubscriptionsHandler{Pool: d.Pool, Audit: d.Audit}).Unsubscribe))
+
+		r.With(middleware.RequireCapability(auth.CapAuditSearch, d.Audit)).
+			Method(http.MethodGet, "/audit/search", http.HandlerFunc((&handlers.AdminAuditHandler{Pool: d.Pool, Audit: d.Audit}).Search))
+	})
+
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(chimw.Timeout(HandlerTimeout))
 		r.Use(middleware.Auth(d.Resolver, d.Audit))
