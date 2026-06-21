@@ -25,6 +25,9 @@ type Deps struct {
 	Resolver   middleware.Resolver
 	ReqLimit   ratelimit.RateLimiter
 	Direct     strategy.RouteStrategy
+	Topic      strategy.RouteStrategy
+	Broadcast  strategy.RouteStrategy
+	DirectDM   strategy.RouteStrategy
 	Dispatcher dispatch.Dispatcher
 }
 
@@ -40,9 +43,31 @@ func NewRouter(d Deps) http.Handler {
 		r.Use(chimw.Timeout(HandlerTimeout))
 		r.Use(middleware.Auth(d.Resolver, d.Audit))
 		r.Use(middleware.RateLimit(d.ReqLimit))
+
 		r.With(middleware.RequireCapability(auth.CapMessagesDirect, d.Audit)).
 			Post("/messages/direct", (&handlers.DirectHandler{
 				Strategy:   d.Direct,
+				Dispatcher: d.Dispatcher,
+				Audit:      d.Audit,
+			}).ServeHTTP)
+
+		r.With(middleware.RequireCapability(auth.CapMessagesTopic, d.Audit)).
+			Post("/messages/topic", (&handlers.TopicHandler{
+				Strategy:   d.Topic,
+				Dispatcher: d.Dispatcher,
+				Audit:      d.Audit,
+			}).ServeHTTP)
+
+		r.With(middleware.RequireCapability(auth.CapMessagesBroadcast, d.Audit)).
+			Post("/messages/broadcast", (&handlers.BroadcastHandler{
+				Strategy:   d.Broadcast,
+				Dispatcher: d.Dispatcher,
+				Audit:      d.Audit,
+			}).ServeHTTP)
+
+		r.With(middleware.RequireCapability(auth.CapMessagesDirectDM, d.Audit)).
+			Post("/messages/direct-dm", (&handlers.DirectDMHandler{
+				Strategy:   d.DirectDM,
 				Dispatcher: d.Dispatcher,
 				Audit:      d.Audit,
 			}).ServeHTTP)

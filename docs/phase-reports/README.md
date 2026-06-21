@@ -47,7 +47,7 @@ next_phase: <N+1>
 | 0 | success | v1 | [phase-0-v1.md](phase-0-v1.md) | `abee04c` |
 | 1a | success | v1 | [phase-1a-v1.md](phase-1a-v1.md) | `abee04c` |
 | 1b | success | v1 | [phase-1b-v1.md](phase-1b-v1.md) | `f37c7bf`, `33c049c` |
-| 2 | — | — | (예정) | — |
+| 2 | success | v1 | [phase-2-v1.md](phase-2-v1.md) | `<pending>` |
 | 3 | — | — | (예정) | — |
 | 4 | — | — | (예정) | — |
 | 5 | — | — | (예정) | — |

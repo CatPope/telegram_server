@@ -1,0 +1,11 @@
+BEGIN;
+
+DELETE FROM user_topics WHERE user_id IN (
+    SELECT id FROM users WHERE telegram_id IN (100000043, 100000044, 100000045)
+);
+DELETE FROM user_subscriptions WHERE user_id IN (
+    SELECT id FROM users WHERE telegram_id IN (100000043, 100000044, 100000045)
+);
+DELETE FROM users WHERE telegram_id IN (100000043, 100000044, 100000045);
+
+COMMIT;

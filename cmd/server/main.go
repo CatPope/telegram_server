@@ -52,6 +52,9 @@ func main() {
 	}
 	dispatcher := tgdisp.New(bot, tgdisp.NewDispatchLimiter())
 	directStrategy := &strategy.DirectStrategy{Resolver: strategy.NewPgDirectResolver(pool)}
+	topicStrategy := &strategy.TopicStrategy{Resolver: strategy.NewPgTopicResolver(pool)}
+	broadcastStrategy := &strategy.BroadcastAllStrategy{Resolver: strategy.NewPgBroadcastResolver(pool)}
+	directDMStrategy := &strategy.DirectDMStrategy{Resolver: strategy.NewPgDirectDMResolver(pool)}
 
 	router := api.NewRouter(api.Deps{
 		Pool:       pool,
@@ -59,6 +62,9 @@ func main() {
 		Resolver:   keyStore,
 		ReqLimit:   reqLimit,
 		Direct:     directStrategy,
+		Topic:      topicStrategy,
+		Broadcast:  broadcastStrategy,
+		DirectDM:   directDMStrategy,
 		Dispatcher: dispatcher,
 	})
 
