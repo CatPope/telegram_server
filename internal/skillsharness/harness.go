@@ -104,14 +104,14 @@ func runFixtureWithMock(ctx context.Context, tr Transcript, serverURL, mockteleg
 	// Best-effort cleanup. Failures (including non-2xx responses) are
 	// intentionally ignored so a fresh run against an empty DB still works.
 	for _, c := range tr.CleanupPaths {
-		req, err := http.NewRequestWithContext(ctx, c.Method, serverURL+c.Path, nil)
+		req, err := http.NewRequestWithContext(ctx, c.Method, serverURL+c.Path, nil) //nolint:noctx
 		if err != nil {
 			continue
 		}
 		if apiKey != "" {
 			req.Header.Set("Authorization", "Bearer "+apiKey)
 		}
-		resp, err := client.Do(req)
+		resp, err := client.Do(req) // #nosec G704 -- serverURL is operator-controlled test infrastructure (localhost), not user input
 		if err == nil {
 			resp.Body.Close()
 		}
@@ -121,9 +121,9 @@ func runFixtureWithMock(ctx context.Context, tr Transcript, serverURL, mockteleg
 	// this transcript's side-effects. Failure is non-fatal — older
 	// mocktelegram builds may not implement /test/reset.
 	if mocktelegramURL != "" {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, mocktelegramURL+"/test/reset", nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, mocktelegramURL+"/test/reset", nil) // #nosec G704 -- mocktelegramURL is operator-controlled test sidecar (localhost), not user input
 		if err == nil {
-			if resp, _ := client.Do(req); resp != nil {
+			if resp, _ := client.Do(req); resp != nil { // #nosec G704 -- same: operator-controlled test infrastructure
 				resp.Body.Close()
 			}
 		}
@@ -174,11 +174,11 @@ func runFixtureWithMock(ctx context.Context, tr Transcript, serverURL, mockteleg
 		return nil
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, mocktelegramURL+"/test/calls", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, mocktelegramURL+"/test/calls", nil) // #nosec G704 -- mocktelegramURL is operator-controlled test sidecar (localhost), not user input
 	if err != nil {
 		return fmt.Errorf("mocktelegram /test/calls: build request: %w", err)
 	}
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) // #nosec G704 -- same: operator-controlled test infrastructure
 	if err != nil {
 		return fmt.Errorf("mocktelegram /test/calls: %w", err)
 	}

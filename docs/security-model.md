@@ -100,3 +100,28 @@ These were surfaced in Phase 4 review and are explicitly deferred to a later pha
 - **PATCH /admin/apps lacks optimistic concurrency.** Two admins reading version=N and each writing distinct mutations will both succeed; the version still advances monotonically but each admin's intent may be partially overwritten by the other. Operator practice: serialize admin writes externally (one operator at a time).
 - **/admin/users/{telegram_id}/subscriptions/{app_id} is gated by `apps.register`.** Any key with `apps.register` can also force-subscribe any user to any app — this is intentional (admin-tier authority over app/user matrix) but worth re-evaluating if a separate `subscriptions.write` capability is needed in Phase 6.
 - **pre-Phase-4 audit_log rows have `capability_set_ver = NULL`.** Forensic queries filtering by version must explicitly handle the NULL case as "pre-Phase-4 (history)".
+
+---
+
+## Phase 7 hardening exceptions
+
+### G704 — SSRF via taint analysis (`internal/skillsharness/harness.go`)
+
+**Rule**: gosec G704 (CWE-918) — Server-Side Request Forgery via taint analysis.
+
+**Finding locations** (all in `internal/skillsharness/harness.go`):
+- Line 114: `client.Do(req)` — cleanup pre-test requests to `serverURL`
+- Line 124: `http.NewRequestWithContext(…, mocktelegramURL+"/test/reset", …)` — reset mocktelegram
+- Line 126: `client.Do(req)` — send the reset request
+- Line 177: `http.NewRequestWithContext(…, mocktelegramURL+"/test/calls", …)` — fetch recorded calls
+- Line 181: `client.Do(req)` — send the fetch request
+
+**Classification**: False positive — accepted risk with suppression annotation.
+
+**Reasoning**: `skillsharness` is a **test-only harness** (`package skillsharness`, used exclusively in `_test.go` files). The URLs (`serverURL`, `mocktelegramURL`) are supplied by:
+1. The test caller (a `*testing.T` context), which is always operator-controlled.
+2. The `MOCKTELEGRAM_URL` environment variable, which is set by the CI operator or `docker-compose.yml` to a known local address (`http://mocktelegram:8090`).
+
+There is no user-supplied input path that could redirect these requests to an arbitrary external host. The SSRF taint is transitive from env-var / test-parameter sources, not from HTTP request data. Suppressed with `// #nosec G704 -- <reason>` inline annotations on each affected line.
+
+**Residual risk**: None in production. The harness package is never compiled into the production binary (`cmd/server`). If the test environment itself is compromised, the attacker already has arbitrary code execution.
