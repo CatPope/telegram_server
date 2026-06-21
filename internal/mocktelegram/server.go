@@ -34,11 +34,13 @@ type Call struct {
 }
 
 type Server struct {
-	httptest *httptest.Server
-	mu       sync.Mutex
-	calls    []Call
-	msgSeq   atomic.Int64
-	topicSeq atomic.Int64
+	httptest  *httptest.Server
+	mu        sync.Mutex
+	calls     []Call
+	msgSeq    atomic.Int64
+	topicSeq  atomic.Int64
+	updateSeq atomic.Int64
+	queue     []json.RawMessage
 }
 
 func New() *Server {
@@ -91,7 +93,41 @@ func (s *Server) record(token, method string, body []byte) {
 	})
 }
 
+// Inject pushes a raw Telegram Update JSON into the queue. The server
+// rewrites the update_id field with a fresh monotonically-increasing value
+// so callers may omit it. The next getUpdates call (after telego's offset
+// catches up) drains the queue.
+func (s *Server) Inject(raw []byte) {
+	var obj map[string]any
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		obj = map[string]any{}
+	}
+	obj["update_id"] = s.updateSeq.Add(1)
+	out, _ := json.Marshal(obj)
+	s.mu.Lock()
+	s.queue = append(s.queue, out)
+	s.mu.Unlock()
+}
+
+func (s *Server) drainQueue() []json.RawMessage {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := s.queue
+	s.queue = nil
+	return out
+}
+
 func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
+	// Test-injection endpoint: POST /test/inject-update with a JSON
+	// Telegram Update body. Used by E2E scripts to drive the bot poller.
+	if r.URL.Path == "/test/inject-update" {
+		body, _ := io.ReadAll(r.Body)
+		s.Inject(body)
+		w.Header().Set("Content-Type", "application/json")
+		writeJSON(w, map[string]any{"ok": true})
+		return
+	}
+
 	// path expected: /bot<token>/<method>
 	const prefix = "/bot"
 	if !strings.HasPrefix(r.URL.Path, prefix) {
@@ -133,7 +169,10 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			},
 		})
 	case "getUpdates":
-		writeJSON(w, map[string]any{"ok": true, "result": []any{}})
+		updates := s.drainQueue()
+		result := make([]json.RawMessage, len(updates))
+		copy(result, updates)
+		writeJSON(w, map[string]any{"ok": true, "result": result})
 	case "createForumTopic":
 		tid := s.topicSeq.Add(1) + 100 // start at 101 to avoid colliding with seed topic ids
 		writeJSON(w, map[string]any{
