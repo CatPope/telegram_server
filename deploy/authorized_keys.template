@@ -1,0 +1,4 @@
+# Place on the deploy host at /home/<user>/.ssh/authorized_keys.
+# command="..." restricts this key to a single, audited operation.
+# Operator: replace <user>, <repo path>, and PUBLIC_KEY before installing.
+command="cd /opt/telegram_server && docker compose pull && docker compose up -d && curl -sf -m 10 http://localhost/healthz",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ssh-ed25519 AAAA<PUBLIC_KEY_PAYLOAD> deploy-bot@github-actions
