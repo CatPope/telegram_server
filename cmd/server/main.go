@@ -17,10 +17,13 @@ import (
 	"github.com/CatPope/telegram_server/internal/api/middleware"
 	"github.com/CatPope/telegram_server/internal/audit"
 	"github.com/CatPope/telegram_server/internal/auth"
+	botpkg "github.com/CatPope/telegram_server/internal/bot"
+	bothandlers "github.com/CatPope/telegram_server/internal/bot/handlers"
 	"github.com/CatPope/telegram_server/internal/config"
 	"github.com/CatPope/telegram_server/internal/dispatch/strategy"
 	tgdisp "github.com/CatPope/telegram_server/internal/dispatch/telegram"
 	"github.com/CatPope/telegram_server/internal/ratelimit"
+	"github.com/CatPope/telegram_server/internal/registry"
 )
 
 func main() {
@@ -72,6 +75,27 @@ func main() {
 		Dispatcher: dispatcher,
 	})
 
+	users := registry.NewUserStore(pool)
+	supergroups := registry.NewSupergroupStore(pool)
+	startHandler := &bothandlers.StartHandler{
+		Bot:         bot,
+		BotUsername: cfg.TelegramBotUsername,
+		Users:       users,
+		Supergroups: supergroups,
+		Audit:       auditW,
+	}
+	poller := botpkg.NewPoller(bot, startHandler)
+
+	botCtx, botCancel := context.WithCancel(ctx)
+	defer botCancel()
+	botDone := make(chan struct{})
+	go func() {
+		if pErr := poller.Run(botCtx); pErr != nil {
+			middleware.Log("error", "bot_poller_run", map[string]any{"error": pErr.Error()})
+		}
+		close(botDone)
+	}()
+
 	srv := &http.Server{
 		Addr:              cfg.HTTPListenAddr,
 		Handler:           router,
@@ -103,6 +127,16 @@ func main() {
 		if listenErr != nil {
 			log.Fatalf("listen: %v", listenErr)
 		}
+	}
+
+	// Tear down bot poller first so in-flight updates can finish their
+	// audit writes against the still-open DB pool; SIGTERM context
+	// cancel propagates to telego's UpdatesViaLongPolling per Pre-mortem #4.
+	botCancel()
+	select {
+	case <-botDone:
+	case <-time.After(10 * time.Second):
+		middleware.Log("warn", "bot_poller_drain_timeout", nil)
 	}
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
