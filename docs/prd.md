@@ -116,7 +116,7 @@ API 요청 기반 Telegram 봇 알림 서버를 Go(+telego)로 구축한다. 외
 | `messages.grade-broadcast` | dev, admin | Grade broadcast |
 | `messages.broadcast.all` | admin | 전체 broadcast |
 | `apps.register` | **dev, admin** | 개발자 자가 앱 등록 |
-| `users.promote` | admin | 사용자 등급 승격 |
+| `users.promote` | admin | 사용자 등급 승격 (dev는 본인 등급 자가 강등만 가능) |
 | `users.deactivate` | admin | 사용자 비활성화 |
 | `topics.manage` | admin | Topic 관리 |
 | `supergroups.manage` | admin | Supergroup 관리 |
@@ -147,7 +147,8 @@ API 요청 기반 Telegram 봇 알림 서버를 Go(+telego)로 구축한다. 외
 
 - **신규 사용자:** `/start` 시 기본 'user' 등급 자동 부여
 - **승격:** 운영자가 `/users` 또는 `/pending` 명령으로 admin/dev 승격
-- **자동 승급:** 없음
+- **사용자 자가 신청:** `/request-grade` FSM (등급 선택 → 사유 입력) → admin/dev 승인 대기
+- **자동 승급:** 없음 (모든 승급은 운영자 명시 승인 필수)
 
 ### 3.4 사용자 등록 플로우 (SLA: 60초)
 
@@ -253,7 +254,8 @@ API 요청 기반 Telegram 봇 알림 서버를 Go(+telego)로 구축한다. 외
 
 ### 5.1 지원 언어
 
-- **v1 지원:** ko (한글), en (영문 — fallback)
+- **v1 지원:** ko (한글), en (영문)
+- **최종 fallback:** `ko` (체인은 §5.3)
 - **DB 저장소:** `users.preferred_lang TEXT NULL`
 - **선택 명령:** `/lang`
 
@@ -350,10 +352,12 @@ API 요청 기반 Telegram 봇 알림 서버를 Go(+telego)로 구축한다. 외
 |-----|------|---------|
 | `received` | 요청 도착 | HTTP 핸들러 진입 시 |
 | `validated` | capability/format 검증 통과 | Auth middleware 완료 후 |
-| `dispatched` | Telegram API 제출 완료 | telego 호출 완료 시 |
-| `delivered` | Telegram 2xx 응답 | Telegram 확인 후 |
+| `dispatched` | Telegram API 2xx 제출 성공 | telego 호출 2xx 응답 시 |
+| `delivered` | Telegram 측 전달 확인 (`dispatched` 후속) | dispatched 후 확인 시 |
+| `retry` | 429 발생 → `retry_after` 기반 재시도 진입 | 자동 backoff 큐 진입 시 |
+| `deferred` | 재시도 한도(기본 3회) 초과 → 지연 처리 | 최종 재시도 실패 시 |
 | `denied` | 권한 또는 유효성 거부 | 검증 실패 시점 (다른 행 없음) |
-| `failed` | Telegram 오류 (429, 4xx, 5xx) | Error 응답 수신 시 |
+| `failed` | Telegram 비복구성 오류 (4xx 그 외, 한도 초과 5xx) | 최종 Error 응답 시 |
 
 ### 8.2 Trace ID 추적
 
@@ -386,7 +390,7 @@ API 요청 기반 Telegram 봇 알림 서버를 Go(+telego)로 구축한다. 외
 - **Telegram 429 (Rate Limited):**
   - Dispatcher가 `retry_after` 헤더 읽음
   - 자동 재시도 (지수 백오프, 최대 3회)
-  - Audit: `submitted_to_telegram` → `retrying` 상태 기록
+  - Audit: `retry` 행 기록 → 성공 시 `dispatched`+`delivered`, 한도 초과 시 `deferred`
 
 - **요청 level 초과:**
   - HTTP 429 응답 + retry-after 헤더
@@ -424,6 +428,7 @@ type RateLimiter interface {
 
 #### Phase 0 — Pre-flight (1 commit)
 - Docker, `ghcr.io` push 권한, golangci-lint, Makefile 확보
+- ADR: HTTP 라우터로 **chi** 채택 결정 기록 (대안 `net/http` 기각 — 미들웨어 수동 조립 비용)
 - Exit: `docker run --rm hello-world` ✓; `make lint` ✓; `gh auth status` ✓
 
 #### Phase 1a — 보안 Perimeter + no-op 핸들러 (3–5 commits)
@@ -445,7 +450,8 @@ type RateLimiter interface {
 - telego long-polling (context 스레딩)
 - `/start` 명령 핸들러, InviteFlow
 - Conversation FSM (Postgres `conversation_state`)
-- Exit: `/start` 60초 SLA, graceful drain (SIGTERM 10초 내)
+- SIGHUP 시 `TELEGRAM_BOT_TOKEN` 재로드 경로 (Pre-mortem #6)
+- Exit: `/start` 60초 SLA, graceful drain (SIGTERM 10초 내), SIGHUP 토큰 reload 동작
 
 #### Phase 4 — Admin API + 정책 기반 rate-limit + 감사 검색 (3–5 commits)
 - `/admin/*` 엔드포인트 (사용자 승격, topic 관리, audit 검색)
@@ -472,7 +478,8 @@ type RateLimiter interface {
 - gosec + govulncheck (high/critical 없음)
 - `scripts/dry-run-rollback.sh` (자동 검증된 rollback)
 - 주간 restore test (pg_dump → restore → row count)
-- Exit: gosec ✓; dry-run-rollback.sh ✓; restore test ✓
+- `scripts/audit-retention.sh` 일별 cron (`/freeze-audit` 존중, 멱등 재실행)
+- Exit: gosec ✓; dry-run-rollback.sh ✓; restore test ✓; audit-retention 멱등성 ✓
 
 ---
 
