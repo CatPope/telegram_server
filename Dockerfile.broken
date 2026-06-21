@@ -1,0 +1,4 @@
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=busybox:1.36 /bin/false /server
+USER nonroot:nonroot
+ENTRYPOINT ["/server"]

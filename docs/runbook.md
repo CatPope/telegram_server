@@ -151,3 +151,43 @@ Follow this procedure when the database is corrupted or data loss has occurred a
    curl -sf http://localhost/healthz
    # Must return HTTP 200.
    ```
+
+---
+
+## Audit Log Backup Rotation (cron)
+
+The `scripts/audit-retention.sh` script creates a timestamped pg_dump backup and prunes files older than `RETENTION_DAYS` (default: 7 days). Wire it up on the deploy host via cron.
+
+### Setup
+
+1. **Copy the script to the deploy host:**
+
+   ```bash
+   scp scripts/audit-retention.sh deploy@<DEPLOY_SSH_HOST>:/opt/telegram_server/
+   chmod +x /opt/telegram_server/audit-retention.sh
+   ```
+
+2. **Create the backup directory:**
+
+   ```bash
+   mkdir -p /backups
+   ```
+
+3. **Add a cron entry** (runs daily at 03:00):
+
+   ```bash
+   crontab -e
+   # Add:
+   0 3 * * * POSTGRES_HOST=localhost POSTGRES_USER=telegram POSTGRES_DB=telegram_server BACKUP_DIR=/backups /opt/telegram_server/audit-retention.sh >> /var/log/audit-retention.log 2>&1
+   ```
+
+4. **Verify a manual run:**
+
+   ```bash
+   POSTGRES_HOST=localhost POSTGRES_USER=telegram POSTGRES_DB=telegram_server BACKUP_DIR=/backups /opt/telegram_server/audit-retention.sh
+   # Expect: audit_retention: created /backups/telegram_server-<timestamp>.sql, pruned 0 stale, retained 1
+   ```
+
+### Manual restore from backup
+
+See "Restore from pg_dump" section above — pass the specific backup file as the restore source.
