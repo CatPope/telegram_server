@@ -1,0 +1,141 @@
+name: Weekly Restore Test
+
+on:
+  schedule:
+    - cron: '0 8 * * 1'  # Mondays 08:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  restore-test:
+    name: restore-test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Start pg-src
+        run: |
+          docker run -d \
+            -e POSTGRES_USER=telegram \
+            -e POSTGRES_PASSWORD=telegram \
+            -e POSTGRES_DB=telegram_server \
+            -p 5432:5432 \
+            --name pg-src \
+            postgres:16-alpine
+
+      - name: Wait for pg-src readiness
+        run: |
+          for i in $(seq 1 30); do
+            if docker exec pg-src pg_isready -U telegram -d telegram_server; then
+              echo "pg-src ready"
+              break
+            fi
+            sleep 2
+          done
+
+      - name: Install golang-migrate
+        run: |
+          curl -sSL https://github.com/golang-migrate/migrate/releases/download/v4.18.1/migrate.linux-amd64.tar.gz \
+            | tar -xz -C /usr/local/bin migrate
+
+      - name: Run migrations against pg-src
+        run: |
+          migrate -path migrations \
+            -database "postgres://telegram:telegram@localhost:5432/telegram_server?sslmode=disable" \
+            up
+
+      - name: Seed pg-src with fixture data
+        run: |
+          cat <<'EOF' | docker exec -i pg-src psql -U telegram -d telegram_server
+          -- 10 users
+          INSERT INTO users (telegram_id, username, grade)
+          SELECT
+            1000 + g,
+            'user_' || g,
+            'user'
+          FROM generate_series(1, 10) AS g
+          ON CONFLICT (telegram_id) DO NOTHING;
+
+          -- 5 apps
+          INSERT INTO apps (name, active, capability_set_version)
+          SELECT
+            'app_' || g,
+            true,
+            1
+          FROM generate_series(1, 5) AS g
+          ON CONFLICT DO NOTHING;
+
+          -- 100 audit_log rows
+          INSERT INTO audit_log (app_id, action, trace_id, delivery_channel, capability_set_ver, created_at)
+          SELECT
+            (SELECT id FROM apps ORDER BY id LIMIT 1),
+            'restore_test_fixture',
+            gen_random_uuid(),
+            'direct',
+            1,
+            NOW()
+          FROM generate_series(1, 100) AS g;
+          EOF
+
+      - name: Dump pg-src
+        run: |
+          docker exec pg-src pg_dump -U telegram telegram_server > /tmp/dump.sql
+          echo "dump size: $(wc -c < /tmp/dump.sql) bytes"
+
+      - name: Stop pg-src
+        run: docker stop pg-src && docker rm pg-src
+
+      - name: Start pg-dst
+        run: |
+          docker run -d \
+            -e POSTGRES_USER=telegram \
+            -e POSTGRES_PASSWORD=telegram \
+            -e POSTGRES_DB=telegram_server \
+            -p 5433:5432 \
+            --name pg-dst \
+            postgres:16-alpine
+
+      - name: Wait for pg-dst readiness
+        run: |
+          for i in $(seq 1 30); do
+            if docker exec pg-dst pg_isready -U telegram -d telegram_server; then
+              echo "pg-dst ready"
+              break
+            fi
+            sleep 2
+          done
+
+      - name: Restore dump into pg-dst
+        run: |
+          cat /tmp/dump.sql | docker exec -i pg-dst psql -U telegram -d telegram_server
+
+      - name: Assert row counts match seeded fixture
+        run: |
+          USERS=$(docker exec pg-dst psql -U telegram -d telegram_server -t -A -c "SELECT count(*) FROM users WHERE username LIKE 'user_%'")
+          APPS=$(docker exec pg-dst psql -U telegram -d telegram_server -t -A -c "SELECT count(*) FROM apps WHERE name LIKE 'app_%'")
+          AUDIT=$(docker exec pg-dst psql -U telegram -d telegram_server -t -A -c "SELECT count(*) FROM audit_log WHERE action = 'restore_test_fixture'")
+
+          echo "users=${USERS}, apps=${APPS}, audit_log=${AUDIT}"
+
+          PASS=true
+          if [ "${USERS}" != "10" ]; then
+            echo "FAIL: expected 10 users, got ${USERS}" >&2
+            PASS=false
+          fi
+          if [ "${APPS}" != "5" ]; then
+            echo "FAIL: expected 5 apps, got ${APPS}" >&2
+            PASS=false
+          fi
+          if [ "${AUDIT}" != "100" ]; then
+            echo "FAIL: expected 100 audit_log rows, got ${AUDIT}" >&2
+            PASS=false
+          fi
+
+          if [ "${PASS}" != "true" ]; then
+            exit 1
+          fi
+          echo "PASS: restore verified — users=10, apps=5, audit_log=100"
