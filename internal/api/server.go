@@ -9,15 +9,19 @@ import (
 	"github.com/CatPope/telegram_server/internal/api/middleware"
 	"github.com/CatPope/telegram_server/internal/audit"
 	"github.com/CatPope/telegram_server/internal/auth"
+	"github.com/CatPope/telegram_server/internal/dispatch"
+	"github.com/CatPope/telegram_server/internal/dispatch/strategy"
 	"github.com/CatPope/telegram_server/internal/ratelimit"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Deps struct {
-	Pool      *pgxpool.Pool
-	Audit     audit.Writer
-	Resolver  middleware.Resolver
-	ReqLimit  ratelimit.RateLimiter
+	Pool       *pgxpool.Pool
+	Audit      audit.Writer
+	Resolver   middleware.Resolver
+	ReqLimit   ratelimit.RateLimiter
+	Direct     strategy.RouteStrategy
+	Dispatcher dispatch.Dispatcher
 }
 
 func NewRouter(d Deps) http.Handler {
@@ -31,8 +35,12 @@ func NewRouter(d Deps) http.Handler {
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(middleware.Auth(d.Resolver, d.Audit))
 		r.Use(middleware.RateLimit(d.ReqLimit))
-		r.With(middleware.RequireCapability(auth.CapNoopInvoke, d.Audit)).
-			Post("/noop", (&handlers.NoopHandler{Audit: d.Audit}).ServeHTTP)
+		r.With(middleware.RequireCapability(auth.CapMessagesDirect, d.Audit)).
+			Post("/messages/direct", (&handlers.DirectHandler{
+				Strategy:   d.Direct,
+				Dispatcher: d.Dispatcher,
+				Audit:      d.Audit,
+			}).ServeHTTP)
 	})
 
 	return r

@@ -31,3 +31,7 @@ func TraceID(ctx context.Context) string {
 	}
 	return ""
 }
+
+func WithTraceID(ctx context.Context, traceID string) context.Context {
+	return context.WithValue(ctx, traceIDCtxKey, traceID)
+}

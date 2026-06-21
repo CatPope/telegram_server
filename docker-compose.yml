@@ -13,7 +13,7 @@ services:
       timeout: 2s
       retries: 20
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:5433:5432"
 
   migrate:
     image: migrate/migrate:v4.18.1
@@ -35,7 +35,7 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-dev-bot-token}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA}
       TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-DJ_notification_bot}
       DATABASE_URL: postgres://telegram:telegram@postgres:5432/telegram_server?sslmode=disable
       HTTP_LISTEN_ADDR: "0.0.0.0:8080"

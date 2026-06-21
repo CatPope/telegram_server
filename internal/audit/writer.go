@@ -27,8 +27,9 @@ func (w *PgWriter) Write(ctx context.Context, e Event) error {
 			recipient_user_id, recipient_chat_id, error_code, details_json
 		) VALUES (
 			COALESCE($1, now()), NULLIF($2,''), NULLIF($3,''), $4, NULLIF($5,''),
-			NULLIF($6,''), NULLIF($7,0), NULLIF($8,''), NULLIF($9,''),
-			NULLIF($10,''), NULLIF($11,0), NULLIF($12,0), NULLIF($13,''), $14
+			NULLIF($6,''), NULLIF($7::bigint, 0), NULLIF($8,''), NULLIF($9,''),
+			NULLIF($10,''), NULLIF($11::bigint, 0), NULLIF($12::bigint, 0),
+			NULLIF($13,''), $14
 		)`
 	at := e.At
 	var atArg any

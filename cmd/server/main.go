@@ -11,12 +11,15 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/mymmrac/telego"
 
 	"github.com/CatPope/telegram_server/internal/api"
 	"github.com/CatPope/telegram_server/internal/api/middleware"
 	"github.com/CatPope/telegram_server/internal/audit"
 	"github.com/CatPope/telegram_server/internal/auth"
 	"github.com/CatPope/telegram_server/internal/config"
+	"github.com/CatPope/telegram_server/internal/dispatch/strategy"
+	tgdisp "github.com/CatPope/telegram_server/internal/dispatch/telegram"
 	"github.com/CatPope/telegram_server/internal/ratelimit"
 )
 
@@ -43,11 +46,20 @@ func main() {
 	keyStore := auth.NewKeyStore(pool)
 	reqLimit := ratelimit.NewRequestLimiter(ratelimit.Policy{RatePerSec: 100, Burst: 100}, nil)
 
+	bot, err := telego.NewBot(cfg.TelegramBotToken)
+	if err != nil {
+		log.Fatalf("telego: %v", err)
+	}
+	dispatcher := tgdisp.New(bot, tgdisp.NewDispatchLimiter())
+	directStrategy := &strategy.DirectStrategy{Resolver: strategy.NewPgDirectResolver(pool)}
+
 	router := api.NewRouter(api.Deps{
-		Pool:     pool,
-		Audit:    auditW,
-		Resolver: keyStore,
-		ReqLimit: reqLimit,
+		Pool:       pool,
+		Audit:      auditW,
+		Resolver:   keyStore,
+		ReqLimit:   reqLimit,
+		Direct:     directStrategy,
+		Dispatcher: dispatcher,
 	})
 
 	srv := &http.Server{
