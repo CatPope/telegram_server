@@ -84,7 +84,7 @@ All 30 ontology entities and L2 acceptance criteria are inherited verbatim from 
 
 ---
 
-## Pre-mortem (7 scenarios — expanded from 3 per Architect #2/#3 + Critic additions)
+## Pre-mortem (10 scenarios — 7 from v2 + 3 added in v6 for personal-supergroup model)
 
 ### Scenario 1: Telegram rate-limited the bot and broadcast is silently incomplete
 
@@ -179,6 +179,45 @@ All 30 ontology entities and L2 acceptance criteria are inherited verbatim from 
 - Documented consistency model in `docs/security-model.md`: capability mutations have request-grain consistency, not row-grain. A request that started before mutation completes under the old capability set, with that fact recorded in the audit row. Admin API returns a `capability_set_version` to operators so they know when mutations are visible to new requests.
 - Audit row records `capability_set_version` at request entry. Forensic queries can reconcile "what did this app have access to at time T" from audit + version table.
 
+### Scenario 8 (v6): User doesn't grant Ban Users admin permission
+
+**Failure:** During §3.4 step 7 setup, user adds bot to personal supergroup but only grants Post Messages + Manage Topics, omitting Ban Users. A third party later joins. Bot cannot `banChatMember`. Notifications continue but the supergroup now has non-owner readers.
+
+**Likelihood:** Medium — easy to overlook one of three permissions.
+
+**Impact:** Medium — privacy breach scoped to that user, not service-wide.
+
+**Mitigation built into plan:**
+- After link, bot calls `getChatAdministrators` to verify all three permissions; missing Ban Users → DM the user with explicit instruction + admin alert.
+- If still missing 24h later, mark user's deliveries paused (`users.bot_is_admin_in_supergroup=false`) until resolved.
+- When intrusion happens but ban fails (permission missing), write `audit_log` `intrusion_unmitigated` and stop all further dispatch to that supergroup until user resolves.
+
+### Scenario 9 (v6): Bot removed/demoted from user's personal supergroup
+
+**Failure:** User accidentally removes bot, demotes it, or revokes admin. `user_topics` references stay in DB but `sendMessage` calls return `chat_not_found` / `bot_is_not_a_chat_member`. Silent failure of notifications for that user.
+
+**Likelihood:** Medium — happens during user account/setting changes.
+
+**Impact:** High — silent dropout per-user.
+
+**Mitigation built into plan:**
+- `my_chat_member` listener catches `left`/`kicked`/`member` (demote) for the bot → `users.bot_is_admin_in_supergroup=false` → dispatch fast-fails for that recipient with `bot_not_admin` audit stage; other recipients in batch unaffected.
+- Bot DMs the user: "관리자에서 제외됐습니다. 다시 admin으로 추가하거나 `/start`로 새 그룹 설정 가능합니다."
+- Re-link path: `/start` with non-NULL `personal_supergroup_chat_id` + `bot_is_admin_in_supergroup=false` offers (a) reuse existing supergroup (if user re-promotes bot) or (b) reset to NULL and provision a new one.
+
+### Scenario 10 (v6): User deletes their personal supergroup
+
+**Failure:** User deletes the Telegram supergroup. `personal_supergroup_chat_id` points to a non-existent chat. Same error surface as Scenario 9.
+
+**Likelihood:** Low.
+
+**Impact:** High — same as Scenario 9.
+
+**Mitigation built into plan:**
+- Telegram emits a `my_chat_member` `left` event when supergroup is deleted; caught by the same Scenario 9 handler.
+- Combined handling — both events route to "supergroup_invalidated" disposition: halt deliveries + DM user + offer reset.
+- Re-link path: user runs `/start` → bot resets `personal_supergroup_chat_id` to NULL and re-issues startgroup deeplink.
+
 ---
 
 ## Expanded Test Plan (unit / integration / e2e / observability)
@@ -196,8 +235,8 @@ All 30 ontology entities and L2 acceptance criteria are inherited verbatim from 
 ### Integration
 
 - **Auth + endpoint:** HTTP request to `/v1/messages/direct` with valid Bearer + valid recipients hits strategy with resolved app identity; revoked key → 401; insufficient capability → 403.
-- **Endpoint + strategy + dispatcher (mocktelegram):** Each of the 4 endpoints invokes correct strategy; dispatcher receives expected `RecipientHandle` set. Uses `mocktelegram` (v2 spec per Critic ind #11): a custom `httptest.Server` shipped in `testdata/mocktelegram/server.go` that records inbound calls, returns canned responses, and simulates rate-limit / chat-not-found / supergroup invite link generation.
-- **Bot handler + registry:** `/start` from a new Telegram user creates `users` row with `grade='user'`, marks audit row, triggers `InviteFlow` (mocktelegram-backed).
+- **Endpoint + strategy + dispatcher (mocktelegram):** Each of the **5 endpoints (direct / direct-dm / topic / broadcast / healthz)** invokes correct strategy; dispatcher receives expected `RecipientHandle` set. Uses `mocktelegram` (v2 spec per Critic ind #11): a custom `httptest.Server` shipped in `testdata/mocktelegram/server.go` that records inbound calls, returns canned responses, and simulates rate-limit / chat-not-found / `my_chat_member` events / `createForumTopic` calls (v6).
+- **Bot handler + registry (v6):** `/start` from a new Telegram user creates `users` row with `grade='user'`, PIPA `/agree` triggers `users` row finalization + [그룹 만들기] startgroup deeplink button. mocktelegram simulates user-create-group → `my_chat_member` matched-token event → `personal_supergroup_chat_id` linked + forum topics provisioned per `(user.grade, user_subscriptions)` + "준비 완료" DM. Intrusion test: third-party `chat_member` event → `banChatMember` within 1s.
 - **Re-invocation /start (v2 per Critic ind):** Same `telegram_id` sends `/start` twice; second invocation does not create a duplicate row; user gets a "이미 등록되셨습니다" reply.
 - **Audit log lifecycle:** Successful dispatch → `received → validated → dispatched → delivered` rows in order; denied request → `received → denied` only, no further rows.
 - **Migration ordering (v2 per Architect #3):** Boot compose, assert `app` service stays in `created` state until `migrate` exits 0.
@@ -302,15 +341,19 @@ docker compose down
 - Integration: endpoint + strategy + dispatcher with mocktelegram.
 - E2E: happy-path direct.
 
-**Exit criterion:**
+**Exit criterion (v6 — direct routes to user's personal supergroup app topic):**
 ```
 docker compose up -d
+# Pre-condition: fixture user 42 with personal_supergroup_chat_id=-100123,
+#   subscribed to app "deploy-alerts", user_topics row -> telegram_topic_id=7
 curl -sf -H 'Authorization: Bearer dev-admin-key' \
-  -d '{"recipients":[42],"envelope":{"text":"hi","schema_version":1}}' \
+  -d '{"recipients":[42],"app_id":"deploy-alerts","envelope":{"text":"hi","schema_version":1}}' \
   http://localhost/v1/messages/direct
 # Expect: 200 with {"message_id":"<uuid>"}
-# mocktelegram log shows a sendMessage call to chat_id 42
+# mocktelegram log shows sendMessage call to chat_id=-100123 with message_thread_id=7
 # 4 audit_log rows exist for this trace_id, in order received → validated → dispatched → delivered
+# audit_log.delivery_channel='supergroup'
+# Negative test: same call but recipient 99 not subscribed to deploy-alerts → 400 recipient_not_subscribed
 ```
 
 ### Phase 2 — Remaining 3 endpoints + `Hook` chain (3–5 commits)
@@ -346,18 +389,53 @@ curl -sf -H 'Authorization: Bearer dev-admin-key' \
 
 **Tests:** integration with bot harness (mocktelegram-backed); E2E /start flow including 60-second SLA assertion; integration for re-invocation idempotence; **graceful drain E2E** (REL-AC-2 / Pre-mortem #4); **SIGHUP token reload** (Pre-mortem #6).
 
-**Exit criterion:**
+**Exit criterion (v6 — personal supergroup setup E2E):**
 ```
 docker compose up -d
-# Send /start from mocktelegram to bot
-testdata/mocktelegram/scripts/send-update.sh /start 12345 --user 12345 --username testuser
-# Within 60s:
-#   - users row exists with telegram_id=12345, grade=user
-#   - mocktelegram has received sendMessage with an invite link
-#   - users.subscribed_topics contains the matching topic_ids
-# Send /start again:
+# Step 1: /start
+testdata/mocktelegram/scripts/send-update.sh /start --user 12345 --username testuser
+# Expect within 5s:
+#   - users row exists with telegram_id=12345, grade=user, agreed_at=NULL (pending /agree)
+#   - mocktelegram received DM with PIPA notice + /agree button
+# Step 2: /agree
+testdata/mocktelegram/scripts/send-update.sh /agree --user 12345
+# Expect within 5s:
+#   - users.agreed_at != NULL
+#   - mocktelegram received DM with [그룹 만들기] button containing
+#     t.me/<bot_username>?startgroup=<one_time_token>
+#   - pending_supergroup_tokens row exists for that token + user 12345
+
+# Step 3: user creates new group; mocktelegram emulates the my_chat_member event
+testdata/mocktelegram/scripts/send-my-chat-member.sh \
+  --bot-added --new-chat-id=-100123 --start-payload=<one_time_token>
+# Expect within 60s:
+#   - users.personal_supergroup_chat_id=-100123
+#   - users.personal_supergroup_linked_at != NULL
+
+# Step 4: user enables Topics + grants bot admin (Post Messages / Manage Topics / Ban Users)
+testdata/mocktelegram/scripts/send-my-chat-member.sh \
+  --chat-id=-100123 --bot-status=administrator \
+  --can-post-messages=true --can-manage-topics=true --can-restrict-members=true
+# Expect within 60s of admin grant:
+#   - users.bot_is_admin_in_supergroup=true
+#   - For each subscribed app: mocktelegram received createForumTopic call
+#   - user_topics rows inserted for each (12345, app_id, telegram_topic_id)
+#   - mocktelegram received "준비 완료" DM to user 12345 with topic list
+
+# Step 5: re-invocation of /start
+testdata/mocktelegram/scripts/send-update.sh /start --user 12345
+# Expect:
 #   - users row count unchanged
-#   - mocktelegram has received a "이미 등록되셨습니다" message
+#   - mocktelegram received "이미 등록되셨습니다" message with personal supergroup info
+
+# Step 6: intrusion test (SG-AC-2)
+testdata/mocktelegram/scripts/send-chat-member.sh \
+  --chat-id=-100123 --new-member-id=99999 --status=member
+# Expect within 1s:
+#   - mocktelegram received banChatMember(-100123, 99999)
+#   - audit_log row with stage='intrusion_kick', chat_id=-100123, kicked_user=99999
+
+# Step 7: graceful drain (REL-AC-2)
 # Send SIGTERM to bot container during a 10-recipient broadcast:
 #   - readiness=0 within 10s
 #   - audit_log has 10 dispatched rows and 10 delivered rows (zero drops)
@@ -534,6 +612,10 @@ All 24 spec ACs inherited verbatim. Plan adds (v2 tightened):
 | Bot token rotation crash-loop | Medium | SIGHUP reload path documented; runbook documents standard restart-with-new-token | Phase 3 (Pre-mortem #6) |
 | Capability mutation under concurrent request | Medium | `capability_set_version` on `apps` + `audit_log`; documented consistency model in `docs/security-model.md` | Phase 4 (Pre-mortem #7) |
 | Single-host SPOF | Acknowledged | Spec defers HA; Pre-mortem #3 makes SPOF survivable | n/a |
+| Ban Users 권한 미부여 (v6) | Medium | Pre-mortem #8: setup 후 권한 검증 + DM 안내 + admin alert + 24h 미해결 시 dispatch 정지 | Phase 3 |
+| 봇이 사용자 supergroup에서 추방·강등 (v6) | High | Pre-mortem #9: `my_chat_member` 감지 → `bot_is_admin_in_supergroup=false` + dispatch 차단 + 사용자 DM | Phase 3 |
+| 사용자가 personal supergroup 삭제 (v6) | High | Pre-mortem #10 (#9와 통합 처리): `my_chat_member` left 감지 → reset 경로 안내 | Phase 3 |
+| Personal supergroup broadcast 비용 N배 (v6) | Low | Telegram global rate-limit 동일; REL-AC-1 (33s ≤ T ≤ 60s for 1000 recipients) 유효 | Phase 2 |
 
 ---
 

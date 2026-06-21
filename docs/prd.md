@@ -664,10 +664,13 @@ type RateLimiter interface {
 - [ ] Unknown recipient → 400 Bad Request
 - [ ] 만료/잘못된 API key → 401 Unauthorized
 
-### 14.3 사용자 등록
+### 14.3 사용자 등록 (v6 — Personal Supergroup)
 
-- [ ] `/start` → 60초 이내 'user' 등급 등록, supergroup 초대, topic 구독
-- [ ] 재호출 `/start` → 중복 생성 없음, "이미 등록" 메시지
+- [ ] `/start` → `/agree` 후 'user' 등급 등록 + [그룹 만들기] startgroup 딥링크 안내 (절차 §3.4)
+- [ ] 사용자가 그룹 + Topics 활성화 + 봇 admin (Post Messages / Manage Topics / Ban Users) 완료 시점부터 60초 이내 봇이 `personal_supergroup_chat_id` 저장 + 가입 앱 forum topic 자동 생성 + "준비 완료" DM (**SG-AC-1**)
+- [ ] 본인 supergroup에 타인 초대 시 1초 이내 자동 `banChatMember` + audit_log `intrusion_kick` (**SG-AC-2**)
+- [ ] `/apps` 가입 시 1초 이내 `user_topics` 행 + `createForumTopic` 호출; 탈퇴 시 row 제거 + `closeForumTopic` (**SUB-AC-1**)
+- [ ] 재호출 `/start` → 중복 생성 없음; 미링크면 startgroup 버튼 재발송, 링크 완료면 "이미 등록" 메시지
 
 ### 14.4 영속성
 
