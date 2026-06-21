@@ -446,7 +446,8 @@ testdata/mocktelegram/scripts/send-chat-member.sh \
 **Files to create:**
 - `internal/api/handlers/admin_apps.go` — `POST/PATCH/DELETE /admin/apps`.
 - `internal/api/handlers/admin_users.go` — `PATCH /admin/users/{id}` for promotion.
-- `internal/api/handlers/admin_topics.go` — `POST/PATCH /admin/topics`, `POST /admin/supergroups`, `POST /admin/subscription_rules`.
+- ~~`internal/api/handlers/admin_topics.go`~~ — **v6에서 삭제** (`/admin/topics`, `/admin/supergroups`, `/admin/subscription_rules` 모두 테이블 폐기로 무의미).
+- `internal/api/handlers/admin_subscriptions.go` (**v6 신규, 옵션**) — `POST/DELETE /admin/users/{id}/subscriptions/{app_id}` 강제 가입/해지 (spec §Post-Spec v6 보류 항목: 즉시 적용 + audit 기록, 사용자 사후 통지).
 - `internal/api/handlers/admin_audit.go` — `GET /admin/audit/search`.
 - `internal/ratelimit/policy_loader.go` — reads `rate_limit_policies` from DB; reloads on admin mutation. Uses the existing `RateLimiter` interface from Phase 1a — **no new abstraction** (Architect #9, P3).
 - `docs/security-model.md` (v2 per Critic ind / Pre-mortem #7) — consistency model documentation including `capability_set_version` semantics.
@@ -470,7 +471,7 @@ curl -sf -X PATCH -H 'Authorization: Bearer dev-admin-key' \
 - `skills/send-notification/SKILL.md` (developer) — invokes `/v1/messages/direct`. Helper scripts in `skills/send-notification/scripts/`.
 - `skills/register-app/SKILL.md` (developer).
 - `skills/manage-users/SKILL.md` (operator).
-- `skills/manage-topics/SKILL.md` (operator).
+- `skills/manage-apps/SKILL.md` (operator) — v6 rename from `manage-topics` (topics now auto-managed per user). Wraps `/admin/apps` CRUD + `min_grade` setting + `rate_limit_policies` write + `/rotate` key rotation.
 - `skills/audit-search/SKILL.md` (operator).
 
 **Tests:** E2E for one skill (`send-notification`) lands first via harness; then remaining 4 skills land + tests in parallel (deferred from Architect #10 disagreement — Critic agreed not blocking, but harness-first is sensible).

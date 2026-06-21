@@ -80,19 +80,19 @@ API 요청 기반 Telegram 봇 알림 서버를 Go(+telego)로 구축한다. 외
 | `/cancel` | 사용자 | 진행 중 FSM 흐름 취소 |
 | `/help` | 사용자 | 명령 목록 |
 
-#### 3.1.3 봇 Conversation — Admin/Dev 명령어 (9개)
+#### 3.1.3 봇 Conversation — Admin/Dev 명령어 (7개, v6)
 
 | 명령어 | 대상 | 설명 |
 |--------|------|------|
-| `/newapp` | Admin/Dev | 새 앱 등록 (FSM: 이름 → 등급 → API key 발급) |
-| `/users` | Admin | 사용자 검색·등급 승격·비활성 관리 |
+| `/newapp` | Admin/Dev | 새 앱 등록 (FSM: 이름 → `min_grade` → API key 발급) |
+| `/users` | Admin | 사용자 검색·등급 승격·비활성 관리·개인 supergroup 링크 상태 조회 |
 | `/pending` | Admin | 등급 신청 대기 목록 (Approve/Reject) |
-| `/supergroups` | Admin | Supergroup 등록·해제 |
-| `/topics <supergroup>` | Admin | Topic 관리 |
 | `/audit <trace_id>\|recent` | Admin/Dev | 감사 로그 조회 |
 | `/quota <app>` | Admin | Rate limit 정책 관리 |
 | `/rotate <app>` | Admin | API key 회전 (rolling 2개) |
 | `/freeze-audit` | Admin | 침해사고 시 audit 삭제 정지/재개 |
+
+> v5의 `/supergroups`·`/topics <supergroup>`은 v6에서 **삭제** — 공유 supergroup 폐기, 개인 supergroup의 forum topic은 사용자의 `/apps` 가입에 따라 자동 관리.
 
 ### 3.2 인증 및 권한
 
@@ -494,17 +494,18 @@ type RateLimiter interface {
 - SIGHUP 시 `TELEGRAM_BOT_TOKEN` 재로드 경로 (Pre-mortem #6)
 - Exit: 봇 처리 60초 SLA (SG-AC-1), 침입자 1초 내 추방 (SG-AC-2), graceful drain (SIGTERM 10초 내), SIGHUP 토큰 reload 동작
 
-#### Phase 4 — Admin API + 정책 기반 rate-limit + 감사 검색 (3–5 commits)
-- `/admin/*` 엔드포인트 (사용자 승격, topic 관리, audit 검색)
+#### Phase 4 — Admin API + 정책 기반 rate-limit + 감사 검색 (3–5 commits, v6)
+- `/admin/*` 엔드포인트 (앱 CRUD + `min_grade`, 사용자 승격·강제 subscription 관리, audit 검색)
 - `rate_limit_policies` 테이블 로드
 - capability_set_version 추적
-- Exit: 사용자 승격, rate-limit 429, audit 검색
+- ~~`/admin/topics`, `/admin/supergroups`, `/admin/subscription_rules`~~ — **v6에서 삭제** (테이블 자체 폐기)
+- Exit: 사용자 승격, app 등록·수정, rate-limit 429, audit 검색
 
 #### Phase 5 — Skills (cross-Claude, OMC 독립) (6 commits)
 - `skills/send-notification/SKILL.md` (dev)
 - `skills/register-app/SKILL.md` (dev)
 - `skills/manage-users/SKILL.md` (admin)
-- `skills/manage-topics/SKILL.md` (admin)
+- `skills/manage-apps/SKILL.md` (admin) — v6: `manage-topics`에서 rename, 앱 CRUD + min_grade + rate-limit + 키 회전
 - `skills/audit-search/SKILL.md` (admin)
 - Live mode + Fixture mode
 - Exit: 각 skill E2E (HTTP request + mocktelegram outcome)
@@ -544,7 +545,7 @@ type RateLimiter interface {
 2. **RouteStrategy 인터페이스** — 새 라우팅 모델 추가 = 새 파일 + register
 3. **Dispatcher 인터페이스** — Telegram 외 Slack/Discord/이메일 추가 가능
 4. **`/v1/...` 버전 prefix** — API 진화 관리
-5. **개방형 enum** (AppGrade, UserGrade, Topic) — DB row 관리
+5. **개방형 enum** (AppGrade, UserGrade, App) — DB row 관리 (v6: `topics` 테이블 폐기, `apps`가 1:1로 토픽 정의 흡수)
 6. **Envelope schema_version** — Forward compatibility
 7. **Hook chain** (pre-send / post-send / on-error) — 처리 로직 주입
 
@@ -697,7 +698,7 @@ type RateLimiter interface {
 ### 14.8 Skills (cross-Claude)
 
 - [ ] Dev: `send-notification`, `register-app` E2E
-- [ ] Admin: `manage-users`, `manage-topics`, `audit-search` E2E
+- [ ] Admin: `manage-users` (등급·비활성·subscription 조회), `manage-apps` (v6: 앱 CRUD·min_grade·rate-limit·키 회전), `audit-search` E2E
 
 ### 14.9 Post-Spec AC (v5 추가)
 
@@ -741,6 +742,9 @@ type RateLimiter interface {
 | 5 | Migration app 시작 후 실행 → crash-loop | High | Compose migrate sidecar (service_completed_successfully), integration test | 1a |
 | 6 | Telegram bot token 회전 중 crash-loop | Medium | SIGHUP reload 경로, runbook | 3 |
 | 7 | 동시 request 중 capability 변경 | Medium | capability_set_version 추적, 문서화된 consistency model | 4 |
+| 8 (v6) | Ban Users 권한 미부여 → 침입자 추방 불가 | Medium | 봇이 setup 후 권한 검증 + DM 안내 + admin alert; 24h 미해결 시 dispatch 정지 (Plan Pre-mortem #8) | 3 |
+| 9 (v6) | 봇이 사용자 supergroup에서 추방/강등 | High | `my_chat_member` 감지 → `bot_is_admin_in_supergroup=false` + dispatch 차단 + 사용자 DM (Plan Pre-mortem #9) | 3 |
+| 10 (v6) | 사용자가 personal supergroup 삭제 | High | Scenario 9 통합 처리 (`my_chat_member` left 감지 → reset 경로) (Plan Pre-mortem #10) | 3 |
 
 ---
 

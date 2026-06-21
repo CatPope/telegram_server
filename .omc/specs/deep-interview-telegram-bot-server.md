@@ -569,6 +569,16 @@ PIPA / `conversation_state` / i18n / `pending_grade_requests` / `app_keys` / `ra
 - `/apps`: 가입 가능 앱(`users.grade ≥ apps.min_grade` 매칭) 목록. 가입 시 → `user_subscriptions` 행 추가 + `telego.CreateForumTopic` 호출 → `user_topics` 행 삽입. 탈퇴 시 → 양쪽 행 제거 + `telego.CloseForumTopic` (archived 보존).
 - `/me`: 본인 grade, `personal_supergroup_chat_id`, 가입 앱·topic 목록 표시.
 
+### v6 Admin 명령·Skill·엔드포인트 정리 (파생 결과)
+
+데이터 모델 변경(`supergroups`·`topics`·`topic_subscribers`·`subscription_rules` 폐기)에 따라 운영자 인터페이스도 일관 정리됨:
+
+- **봇 admin 명령 삭제**: `/supergroups`(supergroup 등록·해제), `/topics <supergroup>`(topic 관리). 9→7개 admin/dev 명령.
+- **Admin API 엔드포인트 삭제**: `POST/PATCH /admin/topics`, `POST /admin/supergroups`, `POST /admin/subscription_rules` — 모두 테이블 폐기로 무의미.
+- **Admin API 신규 (옵션)**: `POST/DELETE /admin/users/{id}/subscriptions/{app_id}` — 강제 가입/해지 (즉시 적용 + audit 기록 + 사용자 사후 통지).
+- **Admin skill rename**: `manage-topics` → **`manage-apps`** — 의미를 "앱 CRUD + `min_grade` 설정 + `rate_limit_policies` write + `/rotate` API 키 회전"으로 정정. 개인 supergroup 내 forum topic은 사용자 `/apps` 가입에 따라 자동 관리되므로 운영자가 직접 관리할 대상 아님.
+- **`/users` 명령 확장**: 사용자 검색 + 등급 승격에 더해 **개인 supergroup 링크 상태 조회** (linked / bot admin / topics 상태)를 표시.
+
 ### v6 추가 수락 기준
 
 - **SG-AC-1**: 사용자가 `/start` 4단계 [그룹 만들기] 버튼 탭 → 새 그룹 생성 + 봇 추가 + Topics 활성화 + 봇에 (Post Messages + Manage Topics + Ban Users) 권한 부여 시점부터 60초 이내, 봇이 `personal_supergroup_chat_id` 저장 + 가입 앱 topics 생성 + "준비 완료" DM 발송. 통합 테스트 검증.
