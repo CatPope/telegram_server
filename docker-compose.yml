@@ -1,0 +1,47 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: telegram
+      POSTGRES_PASSWORD: telegram
+      POSTGRES_DB: telegram_server
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telegram -d telegram_server"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  migrate:
+    image: migrate/migrate:v4.18.1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./migrations:/migrations
+    command: [
+      "-path", "/migrations",
+      "-database", "postgres://telegram:telegram@postgres:5432/telegram_server?sslmode=disable",
+      "up"
+    ]
+    restart: "no"
+
+  app:
+    build: .
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-dev-bot-token}
+      TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-DJ_notification_bot}
+      DATABASE_URL: postgres://telegram:telegram@postgres:5432/telegram_server?sslmode=disable
+      HTTP_LISTEN_ADDR: "0.0.0.0:8080"
+      LOG_LEVEL: info
+    ports:
+      - "127.0.0.1:8080:8080"
+
+volumes:
+  pgdata: {}

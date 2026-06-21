@@ -31,3 +31,6 @@ vendor/
 Thumbs.db
 
 # Tooling — entire .omc/ tracked (user request: track all folders)
+
+# Dev credentials (Phase 1a — gitignored per plan v3)
+docs/dev-credentials.md
