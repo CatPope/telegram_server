@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
+
+      - name: Report lint duration
+        if: always()
+        run: echo "::notice::ci lint duration $((SECONDS))s"
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: telegram
+          POSTGRES_PASSWORD: telegram
+          POSTGRES_DB: telegram_server
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U telegram -d telegram_server"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+
+      - name: Install golang-migrate
+        run: |
+          curl -sSL https://github.com/golang-migrate/migrate/releases/download/v4.18.1/migrate.linux-amd64.tar.gz \
+            | tar -xz -C /usr/local/bin migrate
+
+      - name: Run migrations
+        run: |
+          migrate -path migrations \
+            -database "postgres://telegram:telegram@localhost:5432/telegram_server?sslmode=disable" \
+            up
+
+      - name: Run tests
+        run: go test -race -count=1 ./...
+
+      - name: Report test duration
+        if: always()
+        run: echo "::notice::ci test duration $((SECONDS))s"
