@@ -50,7 +50,7 @@ next_phase: <N+1>
 | 2 | success | v1 | [phase-2-v1.md](phase-2-v1.md) | `a6aed0c` |
 | 3 | success | v1 | [phase-3-v1.md](phase-3-v1.md) | `916cfc0`, `99ed982`, `9840696`, `5e0d6ee` |
 | 4 | success | v1 | [phase-4-v1.md](phase-4-v1.md) | `f492fcf` |
-| 5 | success | v1 | [phase-5-v1.md](phase-5-v1.md) | `dea09da` |
+| 5 | success | v1 | [phase-5-v1.md](phase-5-v1.md) | `dea09da`, `bf41316`, `0fe4eba` |
 | 6 | — | — | (예정) | — |
 | 7 | — | — | (예정) | — |
 
