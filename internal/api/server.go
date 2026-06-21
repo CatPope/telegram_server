@@ -2,8 +2,10 @@ package api
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	chimw "github.com/go-chi/chi/v5/middleware"
 
 	"github.com/CatPope/telegram_server/internal/api/handlers"
 	"github.com/CatPope/telegram_server/internal/api/middleware"
@@ -14,6 +16,8 @@ import (
 	"github.com/CatPope/telegram_server/internal/ratelimit"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+const HandlerTimeout = 30 * time.Second
 
 type Deps struct {
 	Pool       *pgxpool.Pool
@@ -33,6 +37,7 @@ func NewRouter(d Deps) http.Handler {
 	r.Get("/healthz", (&handlers.HealthHandler{Pool: d.Pool}).ServeHTTP)
 
 	r.Route("/v1", func(r chi.Router) {
+		r.Use(chimw.Timeout(HandlerTimeout))
 		r.Use(middleware.Auth(d.Resolver, d.Audit))
 		r.Use(middleware.RateLimit(d.ReqLimit))
 		r.With(middleware.RequireCapability(auth.CapMessagesDirect, d.Audit)).
