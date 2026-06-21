@@ -6,14 +6,14 @@
 
 ## R1. Bounded background waits — 절대 규칙
 
-백그라운드 task(`run_in_background:true`, `Monitor`, 비동기 쉘 작업, agent launch 등)를 시작할 때는 **반드시 expected upper bound(예상 완료 시간)를 함께 명시**한다. 그리고:
+백그라운드 task(`run_in_background:true`, `Monitor`, 비동기 쉘 작업, agent launch 등)를 시작할 때는 **내부적으로 expected upper bound(예상 완료 시간)를 결정**한다. 사용자에게 매번 일일이 보고할 필요 없다. 단 무한 대기에는 절대 빠지지 않는다:
 
-1. Launch 시점에 사용자에게 expected upper bound를 숫자로 알린다 ("최대 90초").
-2. 그 시간이 지나도 완료 통지(`<task-notification>`)가 안 오면 **출력 파일을 Read로 직접 확인**한다. 통지만 기다리지 않는다.
-3. 2~3× upper bound를 넘기면 `TaskStop`(또는 PID kill)으로 즉시 정리하고 가설을 사용자에 보고한다.
-4. "기다리는 중" 같은 vague 답은 금지. 항상 숫자(초·분)와 다음 확인 시점을 함께 말한다.
+1. Launch 직후 다른 작업(다음 산출물 작성, 다른 검증)을 동시에 진행. 통지만 기다리지 않는다.
+2. expected upper bound 시간이 지나도 완료 통지(`<task-notification>`)가 안 오면 **출력 파일을 Read로 직접 확인**한다.
+3. 2~3× upper bound를 넘기면 `TaskStop`(또는 PID kill)으로 즉시 정리한다.
+4. 오로지 **결과**가 사용자에 의미 있을 때만 보고한다. 중간 "기다리는 중", "최대 N초" 같은 status 메시지는 노이즈 — 생략.
 
-**근거:** 사용자 직접 지시: *"항상 알림과 함께 예상 시간을 설정 해놓고, 그 이상 지난다면 확인 해보세요."* (`/remote-control`). 이 규칙을 어기면 silence가 progress와 구분 안 되어 사용자가 반복 status를 묻는 비용이 발생한다.
+**근거:** 사용자 직접 지시 (`/remote-control` 2회): *"사용자에게 일일이 보고하지 말고, 무한 대기에 빠지지 않게 예상 시간이 지나면 직접 확인 해보라"*. 이전에 "사용자에게 숫자로 미리 알린다"로 잘못 적용했었다. 수정 후 정책: **내부 timer + 직접 확인 + 결과만 보고**.
 
 ---
 
