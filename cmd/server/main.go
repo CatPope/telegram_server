@@ -46,7 +46,11 @@ func main() {
 	keyStore := auth.NewKeyStore(pool)
 	reqLimit := ratelimit.NewRequestLimiter(ratelimit.Policy{RatePerSec: 100, Burst: 100}, nil)
 
-	bot, err := telego.NewBot(cfg.TelegramBotToken)
+	botOpts := []telego.BotOption{}
+	if cfg.TelegramAPIURL != "" {
+		botOpts = append(botOpts, telego.WithAPIServer(cfg.TelegramAPIURL))
+	}
+	bot, err := telego.NewBot(cfg.TelegramBotToken, botOpts...)
 	if err != nil {
 		log.Fatalf("telego: %v", err)
 	}

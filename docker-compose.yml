@@ -29,14 +29,28 @@ services:
     ]
     restart: "no"
 
+  mocktelegram:
+    build:
+      context: .
+      dockerfile: Dockerfile.mocktelegram
+    environment:
+      MOCKTELEGRAM_ADDR: ":8090"
+    ports:
+      - "127.0.0.1:8090:8090"
+
   app:
     build: .
     depends_on:
       migrate:
         condition: service_completed_successfully
+      mocktelegram:
+        condition: service_started
     environment:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA}
       TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-DJ_notification_bot}
+      # Dev/test default: redirect telego to mocktelegram. Unset / override
+      # via .env for staging or production where it must hit api.telegram.org.
+      TELEGRAM_API_URL: ${TELEGRAM_API_URL:-http://mocktelegram:8090}
       DATABASE_URL: postgres://telegram:telegram@postgres:5432/telegram_server?sslmode=disable
       HTTP_LISTEN_ADDR: "0.0.0.0:8080"
       LOG_LEVEL: info

@@ -10,6 +10,7 @@ import (
 type Config struct {
 	TelegramBotToken    string
 	TelegramBotUsername string
+	TelegramAPIURL      string // optional; redirects telego to a mock server for dev/test
 	DatabaseURL         string
 	HTTPListenAddr      string
 	LogLevel            string
@@ -18,6 +19,7 @@ type Config struct {
 const (
 	envBotToken    = "TELEGRAM_BOT_TOKEN"
 	envBotUsername = "TELEGRAM_BOT_USERNAME"
+	envAPIURL      = "TELEGRAM_API_URL"
 	envDatabaseURL = "DATABASE_URL"
 	envHTTPListen  = "HTTP_LISTEN_ADDR"
 	envLogLevel    = "LOG_LEVEL"
@@ -27,6 +29,7 @@ func Load() (Config, error) {
 	cfg := Config{
 		TelegramBotToken:    strings.TrimSpace(os.Getenv(envBotToken)),
 		TelegramBotUsername: strings.TrimSpace(os.Getenv(envBotUsername)),
+		TelegramAPIURL:      strings.TrimSpace(os.Getenv(envAPIURL)),
 		DatabaseURL:         strings.TrimSpace(os.Getenv(envDatabaseURL)),
 		HTTPListenAddr:      strings.TrimSpace(os.Getenv(envHTTPListen)),
 		LogLevel:            strings.TrimSpace(os.Getenv(envLogLevel)),
