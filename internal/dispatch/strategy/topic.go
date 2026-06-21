@@ -145,3 +145,8 @@ func maxGrade(a, b string) string {
 	}
 	return b
 }
+
+// GradeRankExported is the package-public form of gradeRank, used by bot
+// handlers (apps catalogue) to mirror the same fail-closed semantics as
+// the dispatch path.
+func GradeRankExported(g string) int { return gradeRank(g) }

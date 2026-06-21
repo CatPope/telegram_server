@@ -77,6 +77,9 @@ func main() {
 
 	users := registry.NewUserStore(pool)
 	supergroups := registry.NewSupergroupStore(pool)
+	userTopics := registry.NewUserTopicStore(pool)
+	provisioner := botpkg.NewTopicProvisioner(bot, userTopics)
+
 	startHandler := &bothandlers.StartHandler{
 		Bot:         bot,
 		BotUsername: cfg.TelegramBotUsername,
@@ -84,7 +87,41 @@ func main() {
 		Supergroups: supergroups,
 		Audit:       auditW,
 	}
-	poller := botpkg.NewPoller(bot, startHandler)
+	startgroupHandler := &bothandlers.StartgroupHandler{
+		Bot:         bot,
+		Supergroups: supergroups,
+	}
+	promoteHandler := &bothandlers.PromoteHandler{
+		Bot:         bot,
+		Supergroups: supergroups,
+		Provisioner: provisioner,
+		Audit:       auditW,
+	}
+	intrusionHandler := &bothandlers.IntrusionHandler{
+		Bot:         bot,
+		Supergroups: supergroups,
+		Audit:       auditW,
+	}
+	if me, meErr := bot.GetMe(ctx); meErr == nil && me != nil {
+		intrusionHandler.BotID = me.ID
+	}
+
+	appsHandler := &bothandlers.AppsHandler{
+		Bot:         bot,
+		Pool:        pool,
+		Users:       users,
+		Provisioner: provisioner,
+	}
+
+	// Order matters: more specific group-context handlers run first so a
+	// plain `/start` in DM still falls through to StartHandler.
+	poller := botpkg.NewPoller(bot,
+		startgroupHandler,
+		promoteHandler,
+		intrusionHandler,
+		appsHandler,
+		startHandler,
+	)
 
 	botCtx, botCancel := context.WithCancel(ctx)
 	defer botCancel()
