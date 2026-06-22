@@ -69,6 +69,7 @@ OK: .github/workflows/secret-scan-canary.yml
 | Task ID | 설명 | 목표 |
 |---|---|---|
 | `phase6-live-deploy-exercise-by-operator` | 운영자가 DEPLOY_SSH_* secret 설정 + authorized_keys.template 설치 + main에 push하여 full deploy pipeline 연습 | 운영자 조치 |
+| `phase6-tailscale-oauth-setup` | 운영자가 Tailscale admin console에서 OAuth client(scope=auth_keys, tag:ci) 생성 + ACL에 `tag:ci → tag:deploy:22/80` 허용 + 배포 호스트에 `tag:deploy` 부여 + `TS_OAUTH_CLIENT_ID`/`TS_OAUTH_SECRET` repo secret 등록. `deploy.yml`은 이미 `tailscale/github-action@v3`를 통합. 자세한 절차는 `docs/deployment.md` "Tailscale 접근" 섹션. | 운영자 조치 |
 | `phase7-rollback-dry-run-script` | staging 환경에 대한 scripted rollback dry-run | Phase 7 |
 
 ## 다음 phase 영향도

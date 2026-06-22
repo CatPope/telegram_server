@@ -114,12 +114,81 @@ GitHub 리포의 **Settings → Secrets and variables → Actions**에서 이들
 
 | 시크릿 | 값 |
 |---|---|
-| `DEPLOY_SSH_HOST` | 배포 호스트의 IP 주소 또는 DNS 이름 |
+| `DEPLOY_SSH_HOST` | 배포 호스트의 tailnet hostname(예: `deploy-host`) 또는 tailscale IP(`100.x.y.z`) |
 | `DEPLOY_SSH_USER` | 배포 호스트의 OS 사용자명 (예: `deploy`) |
 | `DEPLOY_SSH_PRIVATE_KEY` | ed25519 개인 키 파일의 전체 내용 |
 | `DEPLOY_PATH` | `/opt/telegram_server` (선택 사항 — 강제 명령이 이 경로를 하드 코딩) |
+| `TS_OAUTH_CLIENT_ID` | Tailscale OAuth client ID (아래 "Tailscale 접근" 섹션 참조) |
+| `TS_OAUTH_SECRET` | Tailscale OAuth client secret |
+| `TS_TAGS` | (선택) ephemeral 노드에 부여할 tag. 미설정 시 기본값 `tag:ci` |
 
 `GITHUB_TOKEN`은 GitHub Actions에 의해 동일 소유자 GHCR 푸시를 위해 자동 주입된다. 다른 조직으로 푸시하지 않는 한 수동 설정이 필요하지 않다 (GHCR 풀 접근 위 `GHCR_PUSH_TOKEN` 대안 참조).
+
+---
+
+## Tailscale 접근 (tailnet-only 배포 호스트)
+
+배포 호스트가 Tailscale tailnet 안에서만 도달 가능한 경우 (공인 인터넷에 SSH 포트를 열지 않음), GitHub Actions 러너는 매 워크플로 실행마다 **ephemeral 노드**로 tailnet에 join한 다음 SSH한다. `tailscale/github-action`이 이 역할을 수행한다.
+
+### 작동 원리
+
+1. `deploy.yml`의 `Tailscale up` 단계가 OAuth client credential로 ephemeral 인증키를 발급받고 `tailscaled`를 띄운다.
+2. 러너 머신이 `tag:ci`가 부착된 ephemeral 노드로 tailnet에 등록된다.
+3. 이후 SSH 단계와 `/healthz` curl이 tailnet DNS 또는 100.x.y.z 주소를 통해 배포 호스트로 도달한다.
+4. 워크플로가 종료되면 ephemeral 노드는 자동으로 tailnet에서 제거된다.
+
+### 운영자 절차 (한 번만 수행)
+
+1. **OAuth client 생성** (Tailscale admin console)
+   - 접속: <https://login.tailscale.com/admin/settings/oauth>
+   - **Generate OAuth client...** 클릭
+   - Scopes: `auth_keys` (write)
+   - Tags: `tag:ci` (이 client가 발급하는 키가 부여 가능한 tag 목록)
+   - 생성된 **Client ID + Secret**을 그 자리에서 복사한다 (secret은 한 번만 표시됨).
+
+2. **ACL 정의 추가** (Tailscale admin console → Access Controls)
+
+   ACL JSON에 다음 항목을 추가하여 `tag:ci`가 배포 호스트로 SSH할 수 있도록 허용한다. 배포 호스트는 자체 tag (예: `tag:deploy`) 또는 사용자 계정으로 식별한다.
+
+   ```json
+   {
+     "tagOwners": {
+       "tag:ci":     ["autogroup:admin"],
+       "tag:deploy": ["autogroup:admin"]
+     },
+     "acls": [
+       {
+         "action": "accept",
+         "src":    ["tag:ci"],
+         "dst":    ["tag:deploy:22", "tag:deploy:80"]
+       }
+     ]
+   }
+   ```
+
+   포트 22 = SSH, 포트 80 = `/healthz` curl. HTTPS termination을 Caddy로 종료하는 경우 443도 함께 허용.
+
+3. **배포 호스트에 tag 부여**
+   - 배포 호스트에서 `sudo tailscale up --advertise-tags=tag:deploy` 실행
+   - admin console에서 해당 노드의 tag 승인
+
+4. **GitHub repo Secrets 등록**
+   - `TS_OAUTH_CLIENT_ID` ← 1단계의 Client ID
+   - `TS_OAUTH_SECRET` ← 1단계의 Secret
+   - `TS_TAGS` (선택) ← `tag:ci` (미설정 시 워크플로 기본값 사용)
+
+5. **`DEPLOY_SSH_HOST` 값 변경**
+   - 공인 IP/DNS에서 **tailnet hostname** (예: `deploy-host`) 또는 **tailscale IP** (`100.x.y.z`)로 교체
+
+### 검증
+
+OAuth + ACL이 올바르게 설정됐는지 확인하려면 `workflow_dispatch`로 deploy 워크플로를 수동 실행하거나, 임의의 commit을 main에 푸시한다. `Tailscale up` 단계 로그에 `Success.` 가 출력되고 다음 SSH 단계가 timeout 없이 진행되면 OK.
+
+### 보안 메모
+
+- ephemeral 노드는 워크플로 종료 시 자동 제거됨 → tailnet 영구 노드로 누적되지 않음.
+- OAuth client의 scope은 `auth_keys` 발급에만 한정 → ACL 변경, 노드 강제 제거 등 다른 admin 권한 없음.
+- `tag:ci`의 ACL은 SSH/healthz 포트만 허용 → 다른 tailnet 노드에 lateral movement 차단.
 
 ---
 
