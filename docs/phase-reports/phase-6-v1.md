@@ -10,13 +10,13 @@ deferred_tasks: ["phase6-live-deploy-exercise-by-operator", "phase7-rollback-dry
 next_phase: 7
 ---
 
-## Summary
+## 요약
 
-Phase 6 ships CI/CD automation: 4 GitHub Actions workflows (ci, deploy, secret-scan, secret-scan-canary), SSH forced-command deploy key template, and two operator docs (deployment.md, runbook.md). All YAML files parse cleanly; `go build/vet/test` pass with zero regressions. Workflows fire on next push to main; operator must configure GitHub Secrets and install the authorized_keys template before the first auto-deploy succeeds.
+Phase 6은 CI/CD 자동화를 제공: 4개 GitHub Actions workflow (ci, deploy, secret-scan, secret-scan-canary), SSH forced-command deploy key 템플릿, 2개 운영자 문서 (deployment.md, runbook.md). 모든 YAML 파일이 cleanly 파싱되며, `go build/vet/test`는 zero regression으로 통과. Workflow는 main에 대한 다음 push에서 실행. 운영자는 첫 자동 배포가 성공하기 전에 GitHub Secrets를 설정하고 authorized_keys 템플릿을 설치해야 함.
 
-## Deliverables
+## 산출물
 
-### New files
+### 신규 파일
 
 | File | Purpose |
 |---|---|
@@ -28,11 +28,11 @@ Phase 6 ships CI/CD automation: 4 GitHub Actions workflows (ci, deploy, secret-s
 | `docs/deployment.md` | Deploy host prep, GHCR pull access, Caddy reverse proxy, authorized_keys install, GitHub Secrets table, first-deploy bootstrap |
 | `docs/runbook.md` | Rotate TELEGRAM_BOT_TOKEN, rollback procedure, restore from pg_dump |
 
-### Modified files
+### 수정 파일
 
-None. No server code, migrations, Dockerfile, or docker-compose.yml were touched.
+없음. 서버 코드, migration, Dockerfile, docker-compose.yml은 변경되지 않음.
 
-## Tests
+## 테스트
 
 ```
 $ go build ./...        # exit 0, no output
@@ -56,26 +56,26 @@ OK: .github/workflows/secret-scan.yml
 OK: .github/workflows/secret-scan-canary.yml
 ```
 
-## Live Smoke
+## 라이브 스모크
 
-Operator-driven. Workflows fire on next push to main after GitHub Secrets are configured. Local validation via `act` (optional) is documented in Verification below. YAML-only check completed in this pass.
+운영자 주도. GitHub Secrets 설정 후 main에 대한 다음 push에서 workflow가 실행. `act`를 통한 로컬 검증(선택사항)은 아래 검증 섹션에 문서화. 이 pass에서는 YAML만 검사 완료.
 
-## Fix Rounds
+## 수정 라운드
 
-None. Single-pass implementation. One YAML syntax fix during validation (em-dash + bare colon in inline `run:` string replaced with block scalar + ASCII hyphen).
+없음. 단일 pass 구현. 검증 중 1개 YAML 문법 fix (inline `run:` 문자열의 em-dash + bare colon을 block scalar + ASCII hyphen으로 교체).
 
-## Deferred / Known Issues
+## 보류 / 알려진 이슈
 
-| Task ID | Description | Target Phase |
+| Task ID | 설명 | 목표 |
 |---|---|---|
-| `phase6-live-deploy-exercise-by-operator` | Operator must configure DEPLOY_SSH_* secrets + install authorized_keys.template + push to main to exercise the full deploy pipeline | Operator action |
-| `phase7-rollback-dry-run-script` | Scripted rollback dry-run against a staging environment | Phase 7 |
+| `phase6-live-deploy-exercise-by-operator` | 운영자가 DEPLOY_SSH_* secret 설정 + authorized_keys.template 설치 + main에 push하여 full deploy pipeline 연습 | 운영자 조치 |
+| `phase7-rollback-dry-run-script` | staging 환경에 대한 scripted rollback dry-run | Phase 7 |
 
-## Impact on Next Phase
+## 다음 phase 영향도
 
-Phase 7 can rely on the `:previous` GHCR tag being seeded by deploy.yml after the first successful deploy. The runbook rollback procedure is in place. Rate-limit hot-reload and SIGHUP token rotation (deferred from Phase 5/6) are the primary Phase 7 targets.
+Phase 7은 첫 성공적인 배포 후 deploy.yml에서 시드된 `:previous` GHCR 태그를 사용 가능. runbook rollback 절차는 준비 완료. rate-limit hot-reload와 SIGHUP token rotation (Phase 5/6에서 보류)는 Phase 7의 주요 목표.
 
-## Verification (third-party reproducible)
+## 검증 (제3자 재현 가능)
 
 ```sh
 git clone https://github.com/CatPope/telegram_server

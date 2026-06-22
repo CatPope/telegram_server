@@ -12,10 +12,10 @@ next_phase: 3
 
 # Phase 2 — Topic / Broadcast / Direct-DM + Hook chain
 
-## 1. Summary
+## 요약
 4개 라우팅 엔드포인트 셋 완성. 3개 신규 strategy(`topic`, `broadcast-all`, `direct-dm`)와 4개 핸들러가 공통 `runStrategyDispatch` helper를 통해 4-stage audit chain(`received/validated/dispatched/{delivered|deferred|denied}`)과 `delivery_channel`(supergroup/general/dm) 분류를 정확히 emit. Hook chain 추상화(`internal/hook/`)와 첫 audit hook 적용 — 2번째 구체 사용자(Phase 3 bot dispatch 또는 Phase 4 admin)에서 즉시 wire-in 가능.
 
-## 2. Deliverables
+## 산출물
 
 | 분류 | 파일 (LOC) |
 |---|---|
@@ -34,7 +34,7 @@ next_phase: 3
 
 총 변경: **+1,130 LOC / -0 LOC / 17 files**.
 
-## 3. Tests
+## 테스트
 ```
 go test -count=1 ./...
   ok  internal/api/handlers          1.0s
@@ -55,7 +55,7 @@ go build ./...   exit 0
 - `TestChainPreShortCircuit` — pre hook이 `Continue=false`면 core/post 모두 skip
 - `TestChainPayloadMerge` — pre hook이 inject한 payload가 core에 보임
 
-## 4. Live Smoke (6 시나리오)
+## 라이브 스모크 (6 시나리오)
 
 스택: `docker compose up -d --build app migrate` (postgres host port 5433, app 8080). 4 user fixture(user 1 user, 2 developer, 3 user, 4 paused) + user 1/2 deploy-alerts 구독·topic.
 
@@ -86,7 +86,7 @@ placeholder bot token  'AAAAAAAA{20}'                  : 0
 audit_write_failed log lines                            : 0
 ```
 
-## 5. Fix Rounds
+## 수정 라운드
 
 | Round | 출처 | 가설 / 발견 | Fix |
 |---|---|---|---|
@@ -99,7 +99,7 @@ audit_write_failed log lines                            : 0
 
 code-reviewer의 잔여 5 MEDIUM / 4 LOW는 §6 Deferred로 이관.
 
-## 6. Deferred / Known Issues
+## 보류 / 알려진 이슈
 
 ### code-reviewer 잔여 (5 MEDIUM / 4 LOW) — follow-up
 - **MEDIUM** `common.go:64-78` — malformed JSON 경로가 `received` 없이 `denied` 1건만 발행 (Phase 1b 핸들러도 같은 모양). 다음 phase에서 받음→denied 2-stage로 통일하거나 명시 문서화.
@@ -118,7 +118,7 @@ code-reviewer의 잔여 5 MEDIUM / 4 LOW는 §6 Deferred로 이관.
 - **Telegram 실제 발송 미검증**: placeholder bot token 사용 → 모든 happy가 `telegram_auth_failed`. 실 토큰 적용 시점은 Phase 3 (BotFather 토큰 + 봇 username `DJ_notification_bot`).
 - **context-aware recipient loop (MEDIUM, Focus 5)**: 현재 `runStrategyDispatch`는 recipient 루프 안에서 `ctx.Err()`를 검사하지 않음. broadcast의 N>100 케이스에서 timeout 도달 후에도 나머지 recipient에 dispatch 시도. Phase 4 (admin large-broadcast) 도입 전 반드시 보강.
 
-## 7. Impact on Next Phase
+## 다음 phase 영향도
 - **Phase 3 (Bot handlers + /start)**가 재사용하는 핵심:
   - 4-stage audit chain + delivery_channel 패턴 → 봇 사이드 `intrusion_kick`, `bot_not_admin` 등 v6 stage emission도 같은 writer 경로
   - `runStrategyDispatch` helper의 envelope.schema_version 강제 + redaction-safe Audit → 봇 핸들러도 envelope 입력 받으면 그대로 채택 가능
@@ -126,7 +126,7 @@ code-reviewer의 잔여 5 MEDIUM / 4 LOW는 §6 Deferred로 이관.
 - **Phase 4 (Admin API)** 재사용: capability gate 미들웨어가 dev-admin/dev-developer 분리 시 정확히 403/200 결정. admin API 라우트 추가 시 같은 패턴.
 - v6 spec의 `delivery_channel` enum 3종 모두 라이브 시드(`audit_log.delivery_channel`) 보유 → Phase 4 audit search에서 `WHERE delivery_channel='dm'` 같은 운영 쿼리 즉시 사용 가능.
 
-## 8. Verification (third-party reproducible)
+## 검증 (제3자 재현 가능)
 
 ```bash
 # 환경

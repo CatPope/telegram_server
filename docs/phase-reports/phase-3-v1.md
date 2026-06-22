@@ -17,10 +17,10 @@ next_phase: 4
 
 # Phase 3 — Bot handlers + `/start` 등록 흐름 (v6 personal supergroup setup)
 
-## 1. Summary
+## 요약
 v6 architecture의 가입 운영 시스템 핵심을 모두 완성: 5개 봇 핸들러 + 1개 provisioner + registry 3개 + mocktelegram 사이드카 + dispatcher API URL 옵션. 4-단계 E2E 인젝션 시나리오로 PIPA→agree→supergroup link→bot promote 흐름 라이브 검증. 모든 happy path가 mocktelegram을 거쳐 진짜 `delivered`까지 도달.
 
-## 2. Deliverables (4 sub-commits)
+## 산출물 (4 sub-commits)
 
 ### sub-A — Registry 패키지 (commit `916cfc0`의 일부)
 | 파일 | 핵심 |
@@ -62,7 +62,7 @@ v6 architecture의 가입 운영 시스템 핵심을 모두 완성: 5개 봇 핸
 | `internal/mocktelegram/server.go` | `POST /test/inject-update` 추가 — JSON Update 본문을 큐에 push, update_id는 서버가 monotonic 부여. getUpdates에서 drainQueue. |
 | `docs/phase-reports/phase-3-v1.md` + `docs/phase-reports/README.md` | 보고서. |
 
-## 3. Tests
+## 테스트
 ```
 go build ./...   exit 0
 go vet ./...     exit 0
@@ -80,7 +80,7 @@ go test -count=1 ./...
 
 봇/registry/mocktelegram에 대한 단위 테스트는 **§6 Deferred**로 이관. Phase 3 검증은 mocktelegram을 통한 E2E 인젝션이 일차 보증.
 
-## 4. Live Smoke
+## 라이브 스모크
 
 ### 4.1 정적 부트
 ```
@@ -116,10 +116,10 @@ panic log lines: 0
 ### 4.4 mocktelegram inject endpoint
 `POST /test/inject-update` → 200 ok. getUpdates가 drainQueue → telego가 Update로 디코드 → 우리 핸들러가 처리.
 
-## 5. Fix Rounds
+## 수정 라운드
 없음. 첫 시도에 4-시나리오 E2E 통과. mocktelegram inject 구현 시 build/test 라운드 1회로 마감.
 
-## 6. Deferred / Known Issues
+## 보류 / 알려진 이슈
 
 Phase 3 산출물은 plan §Phase 3의 모든 코어 파일을 커버하지만 **E2E 7-step 풀**과 **graceful drain / SIGHUP**은 별도 deferred task로 이관. 이는 plan §Phase 3 "tests" 항목과 Pre-mortem #4/#6에 명시된 항목이며, Phase 4 진입 전 추가 task로 처리 권장:
 
@@ -135,7 +135,7 @@ Phase 3 산출물은 plan §Phase 3의 모든 코어 파일을 커버하지만 *
 
 봇 핸들러/registry 단위 테스트도 모두 deferred. Phase 4 진입 시 일괄 보강.
 
-## 7. Impact on Next Phase
+## 다음 phase 영향도
 - **Phase 4 (Admin API)**가 재사용:
   - registry의 모든 store는 admin API 핸들러 (`/admin/users/{id}` 등)에서 그대로 사용 가능.
   - audit `intrusion_kick`/`bot_not_admin`/`intrusion_unmitigated` stage들이 audit_log에 정상 emit됨 → `/admin/audit/search`가 모두 노출.
@@ -143,7 +143,7 @@ Phase 3 산출물은 plan §Phase 3의 모든 코어 파일을 커버하지만 *
 - mocktelegram inject endpoint는 Phase 4/6의 통합 테스트도 활용. 즉 phase 3가 만든 인프라가 phase 4-7의 E2E 표준.
 - **여전히 placeholder Telegram token이고 실 BotFather 토큰 미적용**. Phase 5 (Skills) 또는 사용자 직권으로 실 토큰 적용 시 production 검증.
 
-## 8. Verification (third-party reproducible)
+## 검증 (제3자 재현 가능)
 
 ```bash
 # 환경 부트

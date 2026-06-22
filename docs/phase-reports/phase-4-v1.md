@@ -19,10 +19,10 @@ next_phase: 5
 
 # Phase 4 — Admin API + capability_set_version + per-app rate-limit + audit search
 
-## 1. Summary
+## 요약
 4개 admin 카테고리(apps CRUD, users 등급, subscriptions force, audit search) + capability_set_version 발급/증분/감사 로그 전파 + rate-limit policy DB 로더 + `docs/security-model.md`까지 한 번에 도입. KeyStore.Resolve를 RepeatableRead read-only tx로 묶어 capability snapshot 일관성 보장(Pre-mortem #7). code-reviewer 21건/security-reviewer 11건 발견 중 must-fix 8건은 단일 fix round에서 모두 적용, 나머지 7건은 Phase 5-7로 deferred.
 
-## 2. Deliverables
+## 산출물
 
 | 분류 | 파일 (LOC) | 핵심 |
 |---|---|---|
@@ -43,7 +43,7 @@ next_phase: 5
 
 총 변경: **+1,640 LOC / -164 LOC / 14 files**.
 
-## 3. Tests
+## 테스트
 ```
 go build ./...     exit 0
 go vet ./...       exit 0
@@ -60,7 +60,7 @@ go test -count=1 ./...
 ```
 신규 admin 핸들러 단위 테스트는 Phase 5/6의 통합 테스트 셋에서 흡수. 보장은 live smoke 13 시나리오로 일차 검증.
 
-## 4. Live Smoke
+## 라이브 스모크
 
 ### 4.1 Phase 4 admin 라이브 (13/13 PASS)
 
@@ -96,7 +96,7 @@ go test -count=1 ./...
 | FIX-7 | KeyStore.Resolve snapshot tx | regression PASS, 모든 bearer resolve |
 | FIX-8 | docs/security-model.md 4 known limitations + Pre-mortem #7 wording | doc만, ✅ |
 
-## 5. Fix Rounds
+## 수정 라운드
 
 ### Round 1
 - Trigger: code-reviewer(4 HIGH/9 MEDIUM/8 LOW) + security-reviewer(1 HIGH/5 MEDIUM/4 LOW) parallel review
@@ -105,7 +105,7 @@ go test -count=1 ./...
 - 수정: outer rows.Err() 검사 직후 명시적 `rows.Close()` 호출(주석으로 사유 명시).
 - 재빌드 후 live smoke 13/13 + fix-verification 8/8 PASS.
 
-## 6. Deferred / Known Issues
+## 보류 / 알려진 이슈
 
 | ID | 항목 | 비고 |
 |---|---|---|
@@ -119,13 +119,13 @@ go test -count=1 ./...
 
 5회 fix round 한도 중 1회만 소진. 위 deferred 항목은 모두 **다른 phase task와 의존성 없음** — Phase 5 진입을 막지 않음. `.omc/state/deferred-tasks.json`는 status=success이므로 생성하지 않음.
 
-## 7. Impact on Next Phase
+## 다음 phase 영향도
 
 - **Phase 5 (Skills bundle)**: admin 엔드포인트를 `manage-apps`/`manage-users`/`audit-search` skill이 호출. wire-up은 단순 HTTP — 추가 서버 변경 0.
 - **Phase 6 (CI/CD)**: `docs/security-model.md`가 secret-scan rationale 문서로 인용 가능. admin route의 `apps.register`/`users.promote`/`audit.search` 분리는 deploy SSH key의 capability scope 결정에 그대로 사용.
 - **Phase 7 (Hardening)**: deferred 항목 중 ratelimit hot-reload + optimistic concurrency + cap shadow + policyloader target validation 일괄 처리.
 
-## 8. Verification (third-party reproducible)
+## 검증 (제3자 재현 가능)
 
 ```bash
 # 환경 부트

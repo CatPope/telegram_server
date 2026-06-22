@@ -31,14 +31,14 @@ next_phase: <N+1>
 
 ## 보고서 본문 구조
 
-1. **Summary** — 한 줄. 무엇을 어떤 상태로 마감했는지.
-2. **Deliverables (산출물)** — 새 파일·수정 파일·삭제 파일.
-3. **Tests** — unit/integration/e2e 결과 + 명령 + PASS/FAIL.
-4. **Live Smoke** — docker compose 위 시나리오별 결과 (응답 코드 + audit chain + 시간).
-5. **Fix Rounds** — fix 라운드별 가설·시도·결과. 0 라운드면 표 생략.
-6. **Deferred / Known Issues** — 임시 보류된 task 또는 미해결 trade-off.
-7. **Impact on Next Phase** — 다음 phase가 의존하는 산출물 + risk.
-8. **Verification (third-party reproducible)** — repo만으로 재현 가능한 명령 셋.
+1. **요약** — 한 줄. 무엇을 어떤 상태로 마감했는지.
+2. **산출물** — 새 파일·수정 파일·삭제 파일.
+3. **테스트** — unit/integration/e2e 결과 + 명령 + PASS/FAIL.
+4. **라이브 스모크** — docker compose 위 시나리오별 결과 (응답 코드 + audit chain + 시간).
+5. **수정 라운드** — fix 라운드별 가설·시도·결과. 0 라운드면 표 생략.
+6. **보류 / 알려진 이슈** — 임시 보류된 task 또는 미해결 trade-off.
+7. **다음 phase 영향도** — 다음 phase가 의존하는 산출물 + risk.
+8. **검증 (제3자 재현 가능)** — repo만으로 재현 가능한 명령 셋.
 
 ## Index
 
@@ -58,7 +58,7 @@ next_phase: <N+1>
 
 | status | 의미 |
 |---|---|
-| **success** | 모든 산출물 + exit criterion + live smoke PASS, push 완료. 다음 phase 자동 진행. |
+| **success** | 모든 산출물 + exit criterion + 라이브 스모크 PASS, push 완료. 다음 phase 자동 진행. |
 | **partial** | 일부 task가 deferred 처리됨. 진행 가능한 잔여 task는 완료. 다음 phase는 deferred task에 의존하지 않는 부분부터 시작. |
 | **deferred** | phase 전체 임시 보류 (5회 fix 후에도 핵심 실패). 사용자에 보고 후 plan 재검토 대기. |
 | **rollback** | phase 적용을 되돌림 (revert 또는 reset). 사유 본문 필수. |

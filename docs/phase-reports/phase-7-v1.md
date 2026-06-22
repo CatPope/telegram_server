@@ -10,13 +10,13 @@ deferred_tasks: []
 next_phase: null
 ---
 
-## Summary
+## 요약
 
-Phase 7 (final) ships hardening: gosec + govulncheck baselines (zero HIGH/CRITICAL after triage), rollback dry-run script, audit-log backup rotation script, weekly restore-test workflow, and security-baseline CI workflow. All exit criteria met; project operationally complete.
+Phase 7 (최종)은 hardening을 제공: gosec + govulncheck baseline (triage 후 zero HIGH/CRITICAL), rollback dry-run script, audit-log backup rotation script, weekly restore-test workflow, security-baseline CI workflow. 모든 exit criterion 충족. 프로젝트 운영 완료.
 
-## Deliverables
+## 산출물
 
-### New files
+### 신규 파일
 
 | File | LOC | Purpose |
 |---|---|---|
@@ -28,7 +28,7 @@ Phase 7 (final) ships hardening: gosec + govulncheck baselines (zero HIGH/CRITIC
 | `docs/security-baseline-gosec.sarif` | — | SARIF forensic baseline (zero HIGH findings after suppression) |
 | `docs/security-baseline-govulncheck.txt` | 1 | govulncheck baseline: "No vulnerabilities found." |
 
-### Modified files
+### 수정 파일
 
 | File | Change |
 |---|---|
@@ -36,7 +36,7 @@ Phase 7 (final) ships hardening: gosec + govulncheck baselines (zero HIGH/CRITIC
 | `docs/security-model.md` | Add `## Phase 7 hardening exceptions` section documenting G704 FP triage |
 | `docs/runbook.md` | Add `## Audit Log Backup Rotation (cron)` section with setup + verification steps |
 
-## Tests
+## 테스트
 
 ```
 $ go build ./...        # exit 0
@@ -74,29 +74,29 @@ OK: .github/workflows/secret-scan.yml
 OK: .github/workflows/secret-scan-canary.yml
 ```
 
-## Live Smoke
+## 라이브 스모크
 
-`scripts/dry-run-rollback.sh` requires a running docker compose stack. The stack was not running during this phase pass (operator exercise deferred — same as Phase 6 live-deploy). The script is validated for POSIX correctness and logic; operator runs it after first successful `docker compose up -d --build`.
+`scripts/dry-run-rollback.sh`는 실행 중인 docker compose stack이 필요. 이 phase pass 중에는 stack이 실행되지 않음 (운영자 연습 보류 — Phase 6 live-deploy와 동일). script는 POSIX correctness 및 logic에 대해 검증됨. 운영자는 첫 성공적인 `docker compose up -d --build` 후 실행.
 
-`scripts/audit-retention.sh` validated by manual inspection: uses `pg_dump`, `find -mtime`, `wc -l`, all standard POSIX utilities; creates backup file and prints 1-line summary on exit 0.
+`scripts/audit-retention.sh`는 수동 검사로 검증: `pg_dump`, `find -mtime`, `wc -l` (모두 표준 POSIX utility) 사용. backup 파일 생성 및 exit 0 시 1줄 요약 출력.
 
-## Fix Rounds
+## 수정 라운드
 
-### Round 1 — gosec G704 triage
+### 라운드 1 — gosec G704 triage
 
-**Finding**: gosec v2.27.1 flagged 4 G704 (SSRF via taint analysis, HIGH/HIGH) in `internal/skillsharness/harness.go` at lines 114, 124, 126, 177, 181.
+**발견**: gosec v2.27.1이 `internal/skillsharness/harness.go` 라인 114, 124, 126, 177, 181에서 4개 G704 (taint analysis를 통한 SSRF, HIGH/HIGH) 플래그.
 
-**Triage**: All findings are in the test harness package (`skillsharness`), never compiled into production binary. URLs are operator-supplied (`serverURL` from test caller, `MOCKTELEGRAM_URL` from env). No user-controlled HTTP input reaches these call sites. Classification: **false positive**.
+**Triage**: 모든 발견은 test harness 패키지 (`skillsharness`)에 있으며, production binary로 compile되지 않음. URL은 운영자 제공 (`serverURL`은 test caller에서, `MOCKTELEGRAM_URL`은 env에서). 이 call site에 도달하는 user-controlled HTTP input 없음. 분류: **false positive**.
 
-**Action**: Added `// #nosec G704 -- <reason>` inline annotation on each flagged line. Documented in `docs/security-model.md § Phase 7 hardening exceptions`.
+**조치**: 각 플래그된 라인에 `// #nosec G704 -- <reason>` inline annotation 추가. `docs/security-model.md § Phase 7 hardening exceptions`에 문서화.
 
-**Result**: `gosec Issues: 0`. No production code changed.
+**결과**: `gosec Issues: 0`. production code 변경 없음.
 
-**Note on gosec version**: `gosec@v2.21.4` failed to install on Go 1.26.4 due to `golang.org/x/tools@v0.25.0` incompatibility (invalid array length constant). Used `gosec@v2.27.1` (latest) which pulls `x/tools@v0.45.0` and compiles cleanly. CI workflow pins `v2.27.1` accordingly.
+**gosec 버전에 대한 주의**: `gosec@v2.21.4`는 `golang.org/x/tools@v0.25.0` 호환성 문제 (invalid array length constant)로 Go 1.26.4에서 설치 실패. `gosec@v2.27.1` (최신)을 사용했으며, `x/tools@v0.45.0`을 pull하여 cleanly compile. CI workflow은 `v2.27.1`을 pin.
 
-## Deferred / Known Issues
+## 보류 / 알려진 이슈
 
-None. Phase 7 is the terminal phase. No tasks deferred.
+없음. Phase 7은 terminal phase. 보류된 task 없음.
 
 ## Impact on Next Phase
 

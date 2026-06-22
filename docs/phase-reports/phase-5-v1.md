@@ -10,21 +10,21 @@ deferred_tasks: ["phase6-live-mode-claude-cli", "phase6-rate-limit-policy-write"
 next_phase: 6
 ---
 
-## Summary
+## 요약
 
-Phase 5 ships the skills bundle: 5 Anthropic-standard SKILL.md documents + POSIX bash helpers + a Go fixture harness (`internal/skillsharness`) with localhost guard. All 21 files committed and pushed in a single pass; `go build ./... && go vet ./... && go test -count=1 ./...` pass clean. Fix round 1 then added live-mode E2E verification against docker compose: 11/11 tests pass (5 fixture + 5 localhost guard + 1 live-skip stub).
+Phase 5는 skills bundle을 제공: 5개 Anthropic 표준 SKILL.md 문서 + POSIX bash 헬퍼 + localhost guard가 있는 Go fixture harness (`internal/skillsharness`). 모든 21개 파일이 1회 pass에서 commit되고 push됨. `go build ./... && go vet ./... && go test -count=1 ./...` 통과. Fix round 1 후 docker compose에 대한 라이브 모드 E2E 검증 추가: 11/11 테스트 통과 (5 fixture + 5 localhost guard + 1 live-skip stub).
 
-## Fix Round 1
+## 수정 라운드 1
 
-Live harness runs surfaced 3 issues; all fixed in one round:
+라이브 harness 실행 시 3가지 이슈 발견. 모두 1회 라운드에서 수정:
 
-1. **mocktelegram introspection** — Container needed rebuild after Phase 5 added `GET /test/calls` + `POST /test/reset`. Once rebuilt, `/test/calls` returns the recorded calls as JSON; `/test/reset` clears them.
-2. **`manage-users.json` transcript** — Used `telegram_id=1` but no fixture user has that id; real seed data has `100000042..45`. Changed to `100000044` (grade=user, no deploy-alerts subscription — both promote and subscribe paths exercise distinct rows).
-3. **Harness `cleanup_paths` + auto-reset** — Added a `CleanupPaths []CleanupCall` field to `Transcript` so re-runs can best-effort DELETE leftover resources. Harness also auto-POSTs `/test/reset` on mocktelegram before each transcript so MinCount assertions reflect only this run's side-effects.
+1. **mocktelegram introspection** — Phase 5에서 `GET /test/calls` + `POST /test/reset` 추가 후 컨테이너 재빌드 필요. 재빌드 후 `/test/calls`는 기록된 호출을 JSON으로 반환. `/test/reset`은 이를 초기화.
+2. **`manage-users.json` transcript** — `telegram_id=1` 사용했으나 fixture 사용자에는 해당 id 없음. 실 seed 데이터는 `100000042..45`를 보유. `100000044` (grade=user, deploy-alerts 구독 없음 — promote와 subscribe 경로가 서로 다른 행 연습)로 변경.
+3. **Harness `cleanup_paths` + auto-reset** — `Transcript`에 `CleanupPaths []CleanupCall` 필드 추가하여 재실행 시 남은 리소스를 best-effort DELETE 가능. Harness는 각 transcript 전에 mocktelegram에 자동으로 `/test/reset` POST하여 MinCount assertion이 이 실행의 side-effect만 반영하도록 함.
 
-After fix: clean DB run = 11/11 PASS. Note: register-app/manage-apps re-runs against a long-running stack still fail with 409 because admin DELETE is soft-only (active=false; PK row retained). A hard-delete admin endpoint is tracked as `phase7-hard-delete-admin-endpoint` in deferred tasks; standard CI pattern is fresh service container per run, so this does not block Phase 6.
+Fix 후: clean DB run = 11/11 PASS. 주의: register-app/manage-apps 재실행이 long-running stack에 대해 여전히 409 실패하는 이유는 admin DELETE가 soft-only (active=false; PK 행 유지)이기 때문. hard-delete admin endpoint는 deferred task에서 `phase7-hard-delete-admin-endpoint`로 추적됨. 표준 CI 패턴은 실행당 fresh service 컨테이너이므로 Phase 6을 막지 않음.
 
-## Deliverables
+## 산출물
 
 ### New files
 
@@ -57,7 +57,7 @@ After fix: clean DB run = 11/11 PASS. Note: register-app/manage-apps re-runs aga
 |---|---|
 | `internal/mocktelegram/server.go` | Added `GET /test/calls` (returns recorded calls as JSON) and `POST /test/reset` introspection endpoints; no existing routes touched |
 
-## Tests
+## 테스트
 
 ```
 $ go build ./...        # exit 0, no output
@@ -89,27 +89,27 @@ Verbose skillsharness output:
     --- PASS: TestLocalhostGuard/send-notification.json
 ```
 
-## Live Smoke
+## 라이브 스모크
 
-Not run in this phase (requires running Docker stack + seeded DB). Fixture tests are designed to run against `docker compose up` when `TELEGRAM_SERVER_URL=http://localhost:8080` is set. The localhost guard CI path runs without any server.
+이 phase에서는 실행하지 않음 (Docker stack + seeded DB 필요). Fixture 테스트는 `TELEGRAM_SERVER_URL=http://localhost:8080`이 설정되었을 때 `docker compose up` 대상으로 실행되도록 설계. localhost guard CI 경로는 서버 없이 실행됨.
 
-## Fix Rounds
+## 수정 라운드
 
-None. Single-pass implementation.
+Fix round 1 이외에 추가 라운드 없음. 단일 pass 구현.
 
-## Deferred / Known Issues
+## 보류 / 알려진 이슈
 
-| Task ID | Description | Target Phase |
+| Task ID | 설명 | 목표 Phase |
 |---|---|---|
-| `phase6-live-mode-claude-cli` | `RunLive` full claude-CLI subprocess plumbing (invoke skill via claude CLI, capture output) | Phase 6 |
-| `phase6-rate-limit-policy-write` | `PUT /admin/apps/{id}/rate-limit-policies` endpoint + manage-apps skill section | Phase 6 |
-| `phase7-key-rotation` | `POST /admin/apps/{id}/rotate-key` endpoint + manage-apps skill section | Phase 7 |
+| `phase6-live-mode-claude-cli` | `RunLive` full claude-CLI subprocess 연결 (skill을 claude CLI로 호출, 출력 캡처) | Phase 6 |
+| `phase6-rate-limit-policy-write` | `PUT /admin/apps/{id}/rate-limit-policies` endpoint + manage-apps skill 섹션 | Phase 6 |
+| `phase7-key-rotation` | `POST /admin/apps/{id}/rotate-key` endpoint + manage-apps skill 섹션 | Phase 7 |
 
-## Impact on Next Phase
+## 다음 phase 영향도
 
-Phase 6 can import `internal/skillsharness` to build the live-mode claude-CLI harness on top of `RunFixture`. The `GET /test/calls` mocktelegram endpoint is now available for any phase that needs to assert Telegram side-effects in integration tests.
+Phase 6은 `internal/skillsharness`를 import하여 `RunFixture` 위에 live-mode claude-CLI harness를 구축 가능. `GET /test/calls` mocktelegram endpoint는 이제 integration 테스트에서 Telegram side-effect를 검증해야 하는 모든 phase에서 사용 가능.
 
-## Verification (third-party reproducible)
+## 검증 (제3자 재현 가능)
 
 ```sh
 git clone https://github.com/CatPope/telegram_server

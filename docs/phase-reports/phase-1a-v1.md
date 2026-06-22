@@ -12,10 +12,10 @@ next_phase: "1b"
 
 # Phase 1a — Security perimeter + no-op handler
 
-## 1. Summary
+## 요약
 공개 API의 보안 페리미터 (인증·캡 검사·rate-limit·audit·redaction)를 단일 no-op 핸들러로 완성. 실제 feature가 들어오기 전 perimeter가 perimeter만으로 관측 가능한 상태에 도달.
 
-## 2. Deliverables
+## 산출물
 
 | 분류 | 파일 |
 |---|---|
@@ -44,7 +44,7 @@ Argon2Parallelism = 1
 Argon2KeyLen      = 32
 ```
 
-## 3. Tests
+## 테스트
 
 ```
 go test ./...
@@ -64,7 +64,7 @@ go build ./... exit 0
 - **`logger_test.go`**: authorization/api_key/token/secret/bearer 등 비밀 키워드 자동 `[REDACTED]`
 - **`limiter_test.go`**: 토큰 버킷 burst + refill + override + zero-policy
 
-## 4. Live Smoke
+## 라이브 스모크
 
 ```
 docker compose up -d
@@ -85,18 +85,18 @@ curl ... -H 'Authorization: Bearer tg_unknown_xxxx...' ...       → 401 unknown
 
 audit_log 4행 정확히 적재됨 (received 1건 + denied 3건).
 
-## 5. Fix Rounds
+## 수정 라운드
 없음. (첫 시도에 통과)
 
-## 6. Deferred / Known Issues
+## 보류 / 알려진 이슈
 없음.
 
-## 7. Impact on Next Phase
+## 다음 phase 영향도
 - **Phase 1b는 perimeter 위에 직접 적층**: capability `messages.direct.send` + audit `dispatched/delivered/deferred` stage 등이 그대로 사용됨.
 - `noop` 라우트/핸들러는 Phase 1b에서 제거됨 (scaffolding 정리).
 - 비밀 누출 0 검증 패턴 (`docker compose logs | grep -c <cleartext>`)이 이후 phase의 표준 검증 단계로 재사용됨.
 
-## 8. Verification (third-party reproducible)
+## 검증 (제3자 재현 가능)
 
 ```
 docker compose up -d

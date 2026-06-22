@@ -12,10 +12,10 @@ next_phase: 2
 
 # Phase 1b — `/v1/messages/direct` end-to-end
 
-## 1. Summary
+## 요약
 첫 실제 라우팅 엔드포인트. RouteStrategy + Dispatcher 추상화를 도입하고 personal supergroup의 app topic으로 메시지를 전송. 4-stage audit chain (`received → validated → dispatched → {delivered|deferred}`) 정착.
 
-## 2. Deliverables
+## 산출물
 
 | 분류 | 파일 |
 |---|---|
@@ -35,7 +35,7 @@ next_phase: 2
 | 수정 | `docker-compose.yml` — host 포트 5432→5433, TELEGRAM_BOT_TOKEN 기본값을 telego regex 통과 형식으로 |
 | 삭제 | `internal/api/handlers/noop.go` (Phase 1a scaffolding) |
 
-## 3. Tests
+## 테스트
 
 ```
 go test -count=1 ./...
@@ -53,7 +53,7 @@ go build ./... exit 0
 - **`direct_test.go`**: 빈 app_id/recipients 거부, fake resolver 결과 forwarding, error 전파, `Name()=="direct"` 잠금
 - **`messages_direct_test.go`**: happy path 4-stage 체인 검증, missing/unsupported envelope.schema_version, empty recipients, recipient_not_subscribed skip, dispatcher 실패 → deferred + classifyDispatchErr, strategy 에러 → 500
 
-## 4. Live Smoke
+## 라이브 스모크
 
 ```
 [1] happy: dev-admin → user 1 (deploy-alerts 구독, bot is admin)
@@ -81,25 +81,25 @@ go build ./... exit 0
 비밀 누출: cleartext bearer 0, placeholder bot token 0
 ```
 
-## 5. Fix Rounds
+## 수정 라운드
 
 | Round | 가설 | 검증 | 결과 |
 |---|---|---|---|
 | 1 | audit insert에서 dispatched·deferred 행 누락. silent 에러 의심 | `audit_write_failed` 로깅 추가 후 재실행 | 진짜 에러 발견: `failed to encode args[11]: -1001234567890 less than minimum value for int4`. → 원인: pgx가 SQL의 `NULLIF($12, 0)`의 리터럴 `0`을 int4로 추론하여 bigint 파라미터를 int4로 인코딩 시도. **Fix**: `NULLIF($N::bigint, 0)` 캐스트. 4-stage 체인 복구 확인. |
 | 2 | 20 동시 burst에서 단일 요청이 ~50분 후 500 응답. handler 무한 대기 | http.Server.{Read,Write}Timeout은 I/O만 다루고 handler-context 무제한임을 확인 | chi `Timeout(30s)` 미들웨어를 `/v1` 라우트에 적용. 5 동시는 2.6s에 모두 완료 (`33c049c`). |
 
-## 6. Deferred / Known Issues
+## 보류 / 알려진 이슈
 - Argon2 m=64MiB × 20+ 동시 요청은 메모리/CPU 직렬화 → 5+ 동시 요청 기준 wall-clock 정상. 캐시는 Phase 4에서 검토 (capability_set_version 기반).
 - Placeholder Telegram token 사용 시 happy path는 항상 `telegram_auth_failed`로 끝남. 실 토큰 적용은 Phase 3 이후 (BotFather 토큰 필요).
 
-## 7. Impact on Next Phase
+## 다음 phase 영향도
 - **Phase 2가 재사용하는 핵심**:
   - RouteStrategy / Dispatcher 인터페이스 → topic / broadcast / direct-dm 전략이 같은 모양으로 끼움
   - `NULLIF($N::bigint, 0)` 캐스트 패턴 → broadcast / topic 핸들러도 동일 SQL writer 사용
   - chi `Timeout(30s)` → /v1/* 전체에 이미 적용됐으므로 신규 핸들러에 추가 작업 불필요
 - **Phase 2 핸들러 작성 시 표준**: 4-stage audit chain + delivery_channel 정확 기록 + 비밀 누출 0 검증.
 
-## 8. Verification (third-party reproducible)
+## 검증 (제3자 재현 가능)
 
 ```
 docker compose up -d

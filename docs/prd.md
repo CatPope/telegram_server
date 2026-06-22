@@ -51,7 +51,7 @@ API 요청 기반 Telegram 봇 알림 서버를 Go(+telego)로 구축한다. 외
 | `/v1/messages/direct-dm` | POST | `{recipients:[user_id...], envelope}` | 각 recipient의 봇 DM(1:1)에 직접 push; 구독·앱·grade 우회 | `messages.direct.dm` (**admin only**) |
 | `/v1/messages/topic` | POST | `{app_id, envelope, min_grade?}` | `app_id` 구독자 중 `users.grade ≥ max(apps.min_grade, request.min_grade)` 통과자 전원의 개인 supergroup의 `app_id` 토픽 | `messages.topic.publish.*` |
 | `/v1/messages/broadcast` | POST | `{envelope, min_grade?}` | 전체 활성 사용자(grade 통과자)의 개인 supergroup **General topic** | `messages.broadcast.all` |
-| `/healthz` | GET | - | 헬스 체크 (status: ok) | 없음 |
+| `/healthz` | GET | - | 헬스 체크 (상태: ok) | 없음 |
 
 **요청 envelope 스키마:**
 ```json
@@ -633,11 +633,11 @@ type RateLimiter interface {
 
 ### 13.4 SSH Auto-Deploy
 
-- **Deploy host:** 단일 호스트 (GitHub Secrets에 host, user, private key, path 저장)
-- **Script:** `docker compose pull && docker compose up -d`
-- **Success gate:** 배포 호스트에서 `curl http://localhost/healthz` 200
-- **Rollback:** Previous image tag 유지, healthcheck 실패 시 자동 롤백
-- **First-deploy bootstrap:** `previous` tag 초기화
+- **배포 호스트:** 단일 호스트 (GitHub Secrets에 host, user, private key, path 저장)
+- **스크립트:** `docker compose pull && docker compose up -d`
+- **성공 게이트:** 배포 호스트에서 `curl http://localhost/healthz` 200
+- **롤백:** 이전 image tag 유지, healthcheck 실패 시 자동 롤백
+- **첫 배포 bootstrap:** `previous` tag 초기화
 
 ### 13.5 HTTPS 종료
 
