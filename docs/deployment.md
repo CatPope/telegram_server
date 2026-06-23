@@ -36,16 +36,52 @@
 
 ## GHCR 풀 접근
 
-배포 호스트는 `ghcr.io/catpope/telegram_server`에서 이미지를 풀하기 위해 인증해야 한다.
+배포 호스트는 `ghcr.io/catpope/telegram_server`에서 이미지를 풀하기 위해 인증해야 한다. 이 프로젝트는 **두 개의 GitHub 계정** (`claude-ops`, `dajung2140`)이 pull 권한을 갖도록 한다 — 운영자가 어느 계정으로 로그인하든 같은 이미지를 받을 수 있다.
 
-1. **read:packages** 범위만 있는 GitHub Personal Access Token(PAT)을 생성한다 (쓰기 없음, 리포 없음).
-2. 배포 호스트에서:
+### 1. 패키지에 read 권한 부여 (한 번만, 패키지 소유자 수행)
 
-   ```bash
-   docker login ghcr.io -u <github-user> -p <PAT-with-read:packages>
-   ```
+`ghcr.io/catpope/telegram_server` 패키지의 소유 계정(`catpope`)이 두 외부 계정을 read 권한자로 추가한다.
 
-3. Docker는 자격 증명을 `~/.docker/config.json`에 저장한다. PAT는 `read:packages`만 필요하다 — 패키지를 푸시하거나 수정할 수 없다.
+1. GitHub에 패키지 소유자(`catpope`)로 로그인.
+2. <https://github.com/users/catpope/packages/container/telegram_server/settings> 접속 (조직 패키지면 `orgs/<org>` 경로).
+3. **Manage Actions access** 아래 **Add Repository** — 이 리포가 push할 수 있도록 연결 (이미 연결되어 있으면 skip).
+4. **Manage access** 섹션 → **Invite teams or people** 클릭.
+5. `claude-ops` 추가 — Role: **Read**.
+6. `dajung2140` 추가 — Role: **Read**.
+7. 두 사용자는 GitHub 알림으로 초대를 수락한다 (또는 `https://github.com/users/<user>/packages` 페이지에서 패키지가 보이면 자동 수락된 것).
+
+> 패키지가 **public**이면 이 단계가 필요 없다. `docker pull`이 인증 없이도 동작한다. 단 CI에서 push하려면 여전히 write 권한이 필요.
+
+### 2. 각 운영자의 PAT 발급 (계정별 1회)
+
+`claude-ops`와 `dajung2140` 각각이 자기 계정으로 다음을 수행한다.
+
+1. <https://github.com/settings/tokens/new> 에서 PAT 발급.
+2. Scopes: **`read:packages`** 만 체크 (쓰기·리포 권한 X).
+3. 토큰을 안전한 곳(1Password 등)에 저장.
+
+각 PAT는 발급한 계정의 read 권한만큼만 동작한다 — `claude-ops`의 PAT는 `claude-ops`가 1단계에서 받은 권한 범위로만 패키지를 pull.
+
+### 3. 배포 호스트에 로그인 (운영자가 선택)
+
+배포 호스트에서 둘 중 한 계정으로 docker login 하면 된다.
+
+```bash
+# 계정 A
+docker login ghcr.io -u claude-ops -p <claude-ops-PAT>
+
+# 또는 계정 B
+docker login ghcr.io -u dajung2140 -p <dajung2140-PAT>
+```
+
+Docker는 자격 증명을 `~/.docker/config.json`에 저장한다. 두 계정 모두에 로그인할 필요는 없다 — 하나만 살아 있으면 pull은 통과. 한 계정 PAT가 만료/취소돼도 다른 계정 PAT로 즉시 전환 가능 (`docker login`만 다시 실행).
+
+### 4. 검증
+
+```bash
+docker pull ghcr.io/catpope/telegram_server:latest
+# 두 계정 어느 쪽으로 로그인했어도 같은 digest를 받아야 함
+```
 
 > **교차 조직 대안:** GitHub Actions 러너가 `catpope`와 다른 조직에 있는 경우, 기본 제공 `GITHUB_TOKEN`은 `ghcr.io/catpope/*`로 푸시할 수 없다. 이 경우 `write:packages` 범위를 사용하여 PAT를 생성하고, 리포 시크릿 `GHCR_PUSH_TOKEN`으로 추가하고, `deploy.yml` 내 `docker/login-action` 단계에서 `secrets.GITHUB_TOKEN`을 `secrets.GHCR_PUSH_TOKEN`으로 바꾼다.
 
