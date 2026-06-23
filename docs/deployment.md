@@ -36,7 +36,7 @@
 
 ## GHCR 풀 접근
 
-배포 호스트(Ubuntu)에서 `ghcr.io/catpope/telegram_server`를 `docker pull` 할 사용자를 `<operator>` 로 표기한다. 운영 호스트에 여러 운영자 계정이 있다면 **각 계정이 아래 절차를 자기 사용자로 1회씩 반복**한다 (Docker 자격 증명은 `~/.docker/config.json`에 사용자별로 저장되므로 공유되지 않는다).
+배포 호스트(Ubuntu)에서 `ghcr.io/catpope/telegram_server`를 `docker pull` 할 사용자를 `<operator>` 로 표기한다.
 
 ### 1. `<operator>` 를 `docker` 그룹에 가입 (호스트 root 1회 수행)
 
@@ -55,8 +55,7 @@ sudo -iu <operator> docker info >/dev/null && echo OK
 
 GHCR private 이미지를 받으려면 `read:packages` scope PAT가 필요하다.
 
-- 발급: <https://github.com/settings/tokens/new> → Scopes: **`read:packages`** 만 체크 (쓰기·리포 권한 X).
-- 여러 운영자 사이에서 같은 PAT를 공유해도 되고, 운영자별로 PAT를 분리해도 된다. 공유는 회전이 1회로 끝나는 운영 단순함, 분리는 GitHub 감사 로그에서 누가 무엇을 pull 했는지 구분 가능.
+발급: <https://github.com/settings/tokens/new> → Scopes: **`read:packages`** 만 체크 (쓰기·리포 권한 X).
 
 > 패키지를 **public**으로 전환하면 이 단계와 다음 단계 모두 불필요 — `docker pull`이 익명으로 동작. 단 CI에서 push할 때는 여전히 write 권한이 필요.
 
