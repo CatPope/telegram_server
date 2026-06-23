@@ -36,52 +36,64 @@
 
 ## GHCR 풀 접근
 
-배포 호스트는 `ghcr.io/catpope/telegram_server`에서 이미지를 풀하기 위해 인증해야 한다. 이 프로젝트는 **두 개의 GitHub 계정** (`claude-ops`, `dajung2140`)이 pull 권한을 갖도록 한다 — 운영자가 어느 계정으로 로그인하든 같은 이미지를 받을 수 있다.
+배포 호스트(Ubuntu)에는 두 운영자 계정 — **`claude-ops`** 와 **`dajung2140`** — 이 있다. 두 Ubuntu 사용자 모두 `ghcr.io/catpope/telegram_server` 이미지를 `docker pull` 할 수 있어야 한다 (운영자 누구든 호스트에 들어와 수동 pull / 롤백을 실행 가능).
 
-### 1. 패키지에 read 권한 부여 (한 번만, 패키지 소유자 수행)
+> Docker 자격 증명은 **사용자별** `~/.docker/config.json`에 저장된다. 한 Ubuntu 사용자가 `docker login` 했다고 다른 사용자가 자동으로 pull 가능한 게 아니므로, 두 사용자 모두에서 1회씩 로그인이 필요하다.
 
-`ghcr.io/catpope/telegram_server` 패키지의 소유 계정(`catpope`)이 두 외부 계정을 read 권한자로 추가한다.
-
-1. GitHub에 패키지 소유자(`catpope`)로 로그인.
-2. <https://github.com/users/catpope/packages/container/telegram_server/settings> 접속 (조직 패키지면 `orgs/<org>` 경로).
-3. **Manage Actions access** 아래 **Add Repository** — 이 리포가 push할 수 있도록 연결 (이미 연결되어 있으면 skip).
-4. **Manage access** 섹션 → **Invite teams or people** 클릭.
-5. `claude-ops` 추가 — Role: **Read**.
-6. `dajung2140` 추가 — Role: **Read**.
-7. 두 사용자는 GitHub 알림으로 초대를 수락한다 (또는 `https://github.com/users/<user>/packages` 페이지에서 패키지가 보이면 자동 수락된 것).
-
-> 패키지가 **public**이면 이 단계가 필요 없다. `docker pull`이 인증 없이도 동작한다. 단 CI에서 push하려면 여전히 write 권한이 필요.
-
-### 2. 각 운영자의 PAT 발급 (계정별 1회)
-
-`claude-ops`와 `dajung2140` 각각이 자기 계정으로 다음을 수행한다.
-
-1. <https://github.com/settings/tokens/new> 에서 PAT 발급.
-2. Scopes: **`read:packages`** 만 체크 (쓰기·리포 권한 X).
-3. 토큰을 안전한 곳(1Password 등)에 저장.
-
-각 PAT는 발급한 계정의 read 권한만큼만 동작한다 — `claude-ops`의 PAT는 `claude-ops`가 1단계에서 받은 권한 범위로만 패키지를 pull.
-
-### 3. 배포 호스트에 로그인 (운영자가 선택)
-
-배포 호스트에서 둘 중 한 계정으로 docker login 하면 된다.
+### 1. 두 Ubuntu 사용자를 `docker` 그룹에 가입 (호스트 root 1회 수행)
 
 ```bash
-# 계정 A
-docker login ghcr.io -u claude-ops -p <claude-ops-PAT>
-
-# 또는 계정 B
-docker login ghcr.io -u dajung2140 -p <dajung2140-PAT>
+sudo usermod -aG docker claude-ops
+sudo usermod -aG docker dajung2140
+# 변경 사항이 적용되려면 각 사용자가 logout → login (또는 새 SSH 세션)
 ```
 
-Docker는 자격 증명을 `~/.docker/config.json`에 저장한다. 두 계정 모두에 로그인할 필요는 없다 — 하나만 살아 있으면 pull은 통과. 한 계정 PAT가 만료/취소돼도 다른 계정 PAT로 즉시 전환 가능 (`docker login`만 다시 실행).
+검증:
+
+```bash
+sudo -iu claude-ops  docker info >/dev/null && echo "claude-ops OK"
+sudo -iu dajung2140  docker info >/dev/null && echo "dajung2140 OK"
+```
+
+### 2. GitHub PAT 발급 (1회, 공유 또는 분리)
+
+GHCR private 이미지를 받으려면 `read:packages` scope PAT가 필요하다.
+
+- **공유 모델 (권장)** — `catpope` 패키지에 read 권한이 있는 GitHub 계정 한 곳에서 PAT 1개를 발급해 두 Ubuntu 사용자가 같이 쓴다. 운영 단순. 토큰 회전 1회로 두 호스트 사용자에 동시 반영.
+- **분리 모델** — 운영자별로 별도의 GitHub 계정 + PAT를 쓴다. 누가 무엇을 pull했는지 GitHub 감사 로그로 구분 가능하지만, 토큰 회전이 2배.
+
+발급: <https://github.com/settings/tokens/new> → Scopes: **`read:packages`** 만 체크 (쓰기·리포 권한 X).
+
+> 패키지를 **public**으로 전환하면 이 단계와 다음 단계 모두 불필요 — `docker pull`이 익명으로 동작. 단 CI에서 push할 때는 여전히 write 권한이 필요.
+
+### 3. 각 Ubuntu 사용자에서 `docker login` (사용자별 1회)
+
+`claude-ops`로 호스트에 로그인하여:
+
+```bash
+echo "<PAT>" | docker login ghcr.io -u <github-user> --password-stdin
+```
+
+다시 `dajung2140`로 로그인하여 동일하게 실행:
+
+```bash
+echo "<PAT>" | docker login ghcr.io -u <github-user> --password-stdin
+```
+
+각 사용자의 `~/.docker/config.json`에 자격 증명이 별도 저장된다 (`--password-stdin`을 쓰면 쉘 history에 토큰이 남지 않는다).
 
 ### 4. 검증
 
 ```bash
-docker pull ghcr.io/catpope/telegram_server:latest
-# 두 계정 어느 쪽으로 로그인했어도 같은 digest를 받아야 함
+sudo -iu claude-ops  docker pull ghcr.io/catpope/telegram_server:latest
+sudo -iu dajung2140  docker pull ghcr.io/catpope/telegram_server:latest
 ```
+
+두 명령 모두 같은 digest를 반환해야 한다. 어느 한쪽이 `unauthorized` / `denied` 를 받으면 그 사용자가 `docker login` 단계를 안 거쳤거나 PAT가 만료된 것.
+
+### 5. CI 자동 배포 사용자와의 관계
+
+GitHub Actions가 SSH로 들어와 `docker compose pull`을 실행하는 사용자는 별도(`DEPLOY_SSH_USER`로 지정 — 일반적으로 `deploy` 같은 service account). 그 사용자에 대해서도 1·3단계와 동일한 절차가 필요하다. 즉, 호스트에는 **세 사용자**가 `docker login`되어 있을 수 있다: `claude-ops`(수동), `dajung2140`(수동), `deploy`(CI 강제 명령).
 
 > **교차 조직 대안:** GitHub Actions 러너가 `catpope`와 다른 조직에 있는 경우, 기본 제공 `GITHUB_TOKEN`은 `ghcr.io/catpope/*`로 푸시할 수 없다. 이 경우 `write:packages` 범위를 사용하여 PAT를 생성하고, 리포 시크릿 `GHCR_PUSH_TOKEN`으로 추가하고, `deploy.yml` 내 `docker/login-action` 단계에서 `secrets.GITHUB_TOKEN`을 `secrets.GHCR_PUSH_TOKEN`으로 바꾼다.
 
