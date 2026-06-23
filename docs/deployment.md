@@ -36,23 +36,23 @@
 
 ## GHCR 풀 접근
 
-배포 호스트(Ubuntu)에는 두 운영자 계정 — **`claude-ops`** 와 **`dajung2140`** — 이 있다. 두 Ubuntu 사용자 모두 `ghcr.io/catpope/telegram_server` 이미지를 `docker pull` 할 수 있어야 한다 (운영자 누구든 호스트에 들어와 수동 pull / 롤백을 실행 가능).
+배포 호스트(Ubuntu)에는 **두 운영자 계정**이 있고 (이 문서에서는 `<operator-a>` / `<operator-b>` 로 표기), 두 사용자 모두 `ghcr.io/catpope/telegram_server` 이미지를 `docker pull` 할 수 있어야 한다. 운영자 누구든 호스트에 들어와 수동 pull / 롤백을 실행할 수 있게 하기 위함.
 
 > Docker 자격 증명은 **사용자별** `~/.docker/config.json`에 저장된다. 한 Ubuntu 사용자가 `docker login` 했다고 다른 사용자가 자동으로 pull 가능한 게 아니므로, 두 사용자 모두에서 1회씩 로그인이 필요하다.
 
 ### 1. 두 Ubuntu 사용자를 `docker` 그룹에 가입 (호스트 root 1회 수행)
 
 ```bash
-sudo usermod -aG docker claude-ops
-sudo usermod -aG docker dajung2140
+sudo usermod -aG docker <operator-a>
+sudo usermod -aG docker <operator-b>
 # 변경 사항이 적용되려면 각 사용자가 logout → login (또는 새 SSH 세션)
 ```
 
 검증:
 
 ```bash
-sudo -iu claude-ops  docker info >/dev/null && echo "claude-ops OK"
-sudo -iu dajung2140  docker info >/dev/null && echo "dajung2140 OK"
+sudo -iu <operator-a>  docker info >/dev/null && echo "operator-a OK"
+sudo -iu <operator-b>  docker info >/dev/null && echo "operator-b OK"
 ```
 
 ### 2. GitHub PAT 발급 (1회, 공유 또는 분리)
@@ -68,32 +68,26 @@ GHCR private 이미지를 받으려면 `read:packages` scope PAT가 필요하다
 
 ### 3. 각 Ubuntu 사용자에서 `docker login` (사용자별 1회)
 
-`claude-ops`로 호스트에 로그인하여:
+운영자 A로 호스트에 로그인하여:
 
 ```bash
 echo "<PAT>" | docker login ghcr.io -u <github-user> --password-stdin
 ```
 
-다시 `dajung2140`로 로그인하여 동일하게 실행:
-
-```bash
-echo "<PAT>" | docker login ghcr.io -u <github-user> --password-stdin
-```
-
-각 사용자의 `~/.docker/config.json`에 자격 증명이 별도 저장된다 (`--password-stdin`을 쓰면 쉘 history에 토큰이 남지 않는다).
+다시 운영자 B로 로그인하여 동일하게 실행. 각 사용자의 `~/.docker/config.json`에 자격 증명이 별도 저장된다 (`--password-stdin`을 쓰면 쉘 history에 토큰이 남지 않는다).
 
 ### 4. 검증
 
 ```bash
-sudo -iu claude-ops  docker pull ghcr.io/catpope/telegram_server:latest
-sudo -iu dajung2140  docker pull ghcr.io/catpope/telegram_server:latest
+sudo -iu <operator-a>  docker pull ghcr.io/catpope/telegram_server:latest
+sudo -iu <operator-b>  docker pull ghcr.io/catpope/telegram_server:latest
 ```
 
 두 명령 모두 같은 digest를 반환해야 한다. 어느 한쪽이 `unauthorized` / `denied` 를 받으면 그 사용자가 `docker login` 단계를 안 거쳤거나 PAT가 만료된 것.
 
 ### 5. CI 자동 배포 사용자와의 관계
 
-GitHub Actions가 SSH로 들어와 `docker compose pull`을 실행하는 사용자는 별도(`DEPLOY_SSH_USER`로 지정 — 일반적으로 `deploy` 같은 service account). 그 사용자에 대해서도 1·3단계와 동일한 절차가 필요하다. 즉, 호스트에는 **세 사용자**가 `docker login`되어 있을 수 있다: `claude-ops`(수동), `dajung2140`(수동), `deploy`(CI 강제 명령).
+GitHub Actions가 SSH로 들어와 `docker compose pull`을 실행하는 사용자는 별도(`DEPLOY_SSH_USER`로 지정 — 일반적으로 `deploy` 같은 service account). 그 사용자에 대해서도 1·3단계와 동일한 절차가 필요하다. 즉, 호스트에는 **세 사용자**가 `docker login`되어 있을 수 있다: 운영자 A·B(수동), 그리고 `DEPLOY_SSH_USER`(CI 강제 명령).
 
 > **교차 조직 대안:** GitHub Actions 러너가 `catpope`와 다른 조직에 있는 경우, 기본 제공 `GITHUB_TOKEN`은 `ghcr.io/catpope/*`로 푸시할 수 없다. 이 경우 `write:packages` 범위를 사용하여 PAT를 생성하고, 리포 시크릿 `GHCR_PUSH_TOKEN`으로 추가하고, `deploy.yml` 내 `docker/login-action` 단계에서 `secrets.GITHUB_TOKEN`을 `secrets.GHCR_PUSH_TOKEN`으로 바꾼다.
 
