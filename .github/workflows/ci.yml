@@ -20,10 +20,11 @@ jobs:
           go-version: "1.26.x"
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        # action @v7 은 golangci-lint v2 시리즈를 지원 (v6 는 v1 전용).
+        # 설정 파일 .golangci.yml 도 version: "2" 로 마이그레이션됨.
+        # v2/v1 자동 갱신으로 인한 재발 방지를 위해 lint version 도 핀.
+        uses: golangci/golangci-lint-action@v7
         with:
-          # golangci-lint v2 시리즈에 핀. v2/v1 자동 갱신으로 인한 재발 방지.
-          # 설정 파일 .golangci.yml 도 version: "2" 로 마이그레이션됨.
           version: v2.1.6
           args: --timeout=5m
 
