@@ -3,7 +3,7 @@ MIGRATE_VERSION ?= v4.18.1
 MIGRATE_IMAGE := migrate/migrate:$(MIGRATE_VERSION)
 DATABASE_URL ?= postgres://telegram:telegram@localhost:5432/telegram_server?sslmode=disable
 
-.PHONY: run test lint vet build migrate-up migrate-down seed-dev psql compose-up compose-down clean
+.PHONY: run test lint vet build migrate-up migrate-down seed-dev psql compose-up compose-down clean smoke
 
 run:
 	go run ./cmd/server
@@ -41,6 +41,9 @@ compose-up:
 
 compose-down:
 	docker compose down
+
+smoke:
+	./scripts/smoke.sh
 
 clean:
 	rm -rf bin/
