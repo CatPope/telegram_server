@@ -1,49 +1,64 @@
+version: "2"
 run:
-  timeout: 5m
   tests: true
-
 linters:
-  disable-all: true
+  default: none
   enable:
     - errcheck
     - gocritic
-    - gofmt
     - gosec
     - govet
     - ineffassign
     - staticcheck
     - unused
-
-linters-settings:
-  gosec:
-    includes:
-      - G101
-      - G102
-      - G103
-      - G104
-      - G106
-      - G107
-      - G108
-      - G109
-      - G110
-      - G401
-      - G402
-      - G403
-      - G404
-      - G501
-      - G502
-      - G503
-      - G504
-      - G505
-    excludes: []
-    severity: medium
-    confidence: medium
-
-issues:
-  exclude-dirs:
-    - vendor
-    - testdata/mocktelegram
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - gosec
+  settings:
+    gosec:
+      includes:
+        - G101
+        - G102
+        - G103
+        - G104
+        - G106
+        - G107
+        - G108
+        - G109
+        - G110
+        - G401
+        - G402
+        - G403
+        - G404
+        - G501
+        - G502
+        - G503
+        - G504
+        - G505
+      severity: medium
+      confidence: medium
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - gosec
+        path: _test\.go
+    paths:
+      - vendor
+      - testdata/mocktelegram
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gofmt
+  exclusions:
+    generated: lax
+    paths:
+      - vendor
+      - testdata/mocktelegram
+      - third_party$
+      - builtin$
+      - examples$

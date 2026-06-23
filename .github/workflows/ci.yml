@@ -22,7 +22,9 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          # golangci-lint v2 시리즈에 핀. v2/v1 자동 갱신으로 인한 재발 방지.
+          # 설정 파일 .golangci.yml 도 version: "2" 로 마이그레이션됨.
+          version: v2.1.6
           args: --timeout=5m
 
       - name: Report lint duration
