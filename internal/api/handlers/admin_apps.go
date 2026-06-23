@@ -25,11 +25,11 @@ var allowedCapabilities = map[string]bool{
 }
 
 var forbiddenCapabilities = map[string]bool{
-	"apps.register":     true,
-	"users.promote":     true,
-	"users.deactivate":  true,
-	"audit.search":      true,
-	"audit.freeze":      true,
+	"apps.register":    true,
+	"users.promote":    true,
+	"users.deactivate": true,
+	"audit.search":     true,
+	"audit.freeze":     true,
 }
 
 var validMinGrades = map[string]bool{

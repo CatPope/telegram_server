@@ -19,10 +19,10 @@ import (
 // demoted, removed, or the supergroup is deleted it flips the same flag
 // back to false so dispatch fails fast with bot_not_admin.
 type PromoteHandler struct {
-	Bot          *telego.Bot
-	Supergroups  *registry.SupergroupStore
-	Provisioner  *bot.TopicProvisioner
-	Audit        audit.Writer
+	Bot         *telego.Bot
+	Supergroups *registry.SupergroupStore
+	Provisioner *bot.TopicProvisioner
+	Audit       audit.Writer
 }
 
 func (h *PromoteHandler) Name() string { return "promote" }

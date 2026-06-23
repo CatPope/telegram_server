@@ -28,11 +28,11 @@ func (s *stubStrategy) Resolve(_ context.Context, _ strategy.Request) (strategy.
 }
 
 type stubDispatcher struct {
-	mu       sync.Mutex
-	sent     []strategy.RecipientHandle
-	envs     []strategy.Envelope
-	failFor  map[int64]error
-	nextID   int64
+	mu      sync.Mutex
+	sent    []strategy.RecipientHandle
+	envs    []strategy.Envelope
+	failFor map[int64]error
+	nextID  int64
 }
 
 func (s *stubDispatcher) Send(_ context.Context, h strategy.RecipientHandle, env strategy.Envelope) (dispatch.DeliveryResult, error) {

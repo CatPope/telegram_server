@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	defaultGlobalRatePerSec = 25.0
+	defaultGlobalRatePerSec  = 25.0
 	defaultPerChatRatePerSec = 1.0
 	defaultBurstGlobal       = 30.0
 	defaultBurstPerChat      = 2.0
@@ -38,14 +38,14 @@ type perChatBucket struct {
 func NewDispatchLimiter() *DispatchLimiter {
 	now := time.Now()
 	return &DispatchLimiter{
-		now:      time.Now,
-		gTokens:  defaultBurstGlobal,
-		gRefill:  now,
-		gRate:    defaultGlobalRatePerSec,
-		gBurst:   defaultBurstGlobal,
-		per:      make(map[string]*perChatBucket),
-		pRate:    defaultPerChatRatePerSec,
-		pBurst:   defaultBurstPerChat,
+		now:     time.Now,
+		gTokens: defaultBurstGlobal,
+		gRefill: now,
+		gRate:   defaultGlobalRatePerSec,
+		gBurst:  defaultBurstGlobal,
+		per:     make(map[string]*perChatBucket),
+		pRate:   defaultPerChatRatePerSec,
+		pBurst:  defaultBurstPerChat,
 	}
 }
 

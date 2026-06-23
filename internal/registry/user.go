@@ -11,19 +11,19 @@ import (
 )
 
 type User struct {
-	ID                     int64
-	TelegramID             int64
-	Username               string
-	Grade                  string
-	PreferredLang          string
-	AgreedAt               *time.Time
-	PersonalSupergroupID   *int64
-	PersonalLinkedAt       *time.Time
-	BotIsAdmin             bool
-	Status                 string
-	Anonymized             bool
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
+	ID                   int64
+	TelegramID           int64
+	Username             string
+	Grade                string
+	PreferredLang        string
+	AgreedAt             *time.Time
+	PersonalSupergroupID *int64
+	PersonalLinkedAt     *time.Time
+	BotIsAdmin           bool
+	Status               string
+	Anonymized           bool
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 var ErrUserNotFound = errors.New("registry: user not found")

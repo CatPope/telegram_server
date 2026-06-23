@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -27,9 +28,18 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// run wraps the real main body so deferred cleanup (cancel/pool.Close)
+// always executes — gocritic exitAfterDefer would otherwise warn that
+// log.Fatalf in the body skips deferred calls.
+func run() error {
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("config: %v", err)
+		return fmt.Errorf("config: %w", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -37,12 +47,12 @@ func main() {
 
 	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("db: %v", err)
+		return fmt.Errorf("db: %w", err)
 	}
 	defer pool.Close()
 
 	if pingErr := waitForDB(ctx, pool, 30*time.Second); pingErr != nil {
-		log.Fatalf("db wait: %v", pingErr)
+		return fmt.Errorf("db wait: %w", pingErr)
 	}
 
 	auditW := audit.NewPgWriter(pool)
@@ -50,7 +60,7 @@ func main() {
 	policyLoader := ratelimit.NewPolicyLoader(pool, "request")
 	reqLimit, err := policyLoader.BuildRequestLimiter(ctx, ratelimit.Policy{RatePerSec: 100, Burst: 100})
 	if err != nil {
-		log.Fatalf("ratelimit policies: %v", err)
+		return fmt.Errorf("ratelimit policies: %w", err)
 	}
 
 	botOpts := []telego.BotOption{}
@@ -59,7 +69,7 @@ func main() {
 	}
 	bot, err := telego.NewBot(cfg.TelegramBotToken, botOpts...)
 	if err != nil {
-		log.Fatalf("telego: %v", err)
+		return fmt.Errorf("telego: %w", err)
 	}
 	dispatcher := tgdisp.New(bot, tgdisp.NewDispatchLimiter())
 	directStrategy := &strategy.DirectStrategy{Resolver: strategy.NewPgDirectResolver(pool)}
@@ -166,7 +176,7 @@ func main() {
 		middleware.Log("info", "shutdown_requested", nil)
 	case listenErr := <-errCh:
 		if listenErr != nil {
-			log.Fatalf("listen: %v", listenErr)
+			return fmt.Errorf("listen: %w", listenErr)
 		}
 	}
 
@@ -186,6 +196,7 @@ func main() {
 		middleware.Log("error", "shutdown_failed", map[string]any{"error": shutdownErr.Error()})
 	}
 	middleware.Log("info", "server_stopped", nil)
+	return nil
 }
 
 func waitForDB(ctx context.Context, pool *pgxpool.Pool, timeout time.Duration) error {

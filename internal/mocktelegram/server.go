@@ -4,13 +4,14 @@
 // exercised in tests without reaching api.telegram.org.
 //
 // Supported endpoints (Phase 3 sub-B initial set):
-//   POST /bot<token>/sendMessage         -> 200 ok, synthetic message_id
-//   POST /bot<token>/getMe               -> 200 ok, bot identity
-//   POST /bot<token>/getUpdates          -> 200 ok, empty updates
-//   POST /bot<token>/createForumTopic    -> 200 ok, synthetic message_thread_id
-//   POST /bot<token>/closeForumTopic     -> 200 ok, true
-//   POST /bot<token>/banChatMember       -> 200 ok, true
-//   POST /bot<token>/getChatAdministrators -> 200 ok, [bot is admin]
+//
+//	POST /bot<token>/sendMessage         -> 200 ok, synthetic message_id
+//	POST /bot<token>/getMe               -> 200 ok, bot identity
+//	POST /bot<token>/getUpdates          -> 200 ok, empty updates
+//	POST /bot<token>/createForumTopic    -> 200 ok, synthetic message_thread_id
+//	POST /bot<token>/closeForumTopic     -> 200 ok, true
+//	POST /bot<token>/banChatMember       -> 200 ok, true
+//	POST /bot<token>/getChatAdministrators -> 200 ok, [bot is admin]
 //
 // Anything else returns 404. The server is intentionally permissive: it does
 // not validate token shape, payload shape, or HMAC. Use it for routing /
@@ -56,8 +57,8 @@ func NewHandler() http.Handler {
 	return http.HandlerFunc(s.serve)
 }
 
-func (s *Server) URL() string  { return s.httptest.URL }
-func (s *Server) Close()       { s.httptest.Close() }
+func (s *Server) URL() string { return s.httptest.URL }
+func (s *Server) Close()      { s.httptest.Close() }
 
 func (s *Server) Calls() []Call {
 	s.mu.Lock()
@@ -203,9 +204,9 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{
 			"ok": true,
 			"result": map[string]any{
-				"message_thread_id":   tid,
-				"name":                "topic",
-				"icon_color":          0,
+				"message_thread_id":    tid,
+				"name":                 "topic",
+				"icon_color":           0,
 				"icon_custom_emoji_id": "",
 			},
 		})
@@ -216,11 +217,11 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			"ok": true,
 			"result": []any{
 				map[string]any{
-					"user":   map[string]any{"id": 1, "is_bot": true, "first_name": "MockBot"},
-					"status": "administrator",
-					"can_post_messages":      true,
-					"can_manage_topics":      true,
-					"can_restrict_members":   true,
+					"user":                 map[string]any{"id": 1, "is_bot": true, "first_name": "MockBot"},
+					"status":               "administrator",
+					"can_post_messages":    true,
+					"can_manage_topics":    true,
+					"can_restrict_members": true,
 				},
 			},
 		})

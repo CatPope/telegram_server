@@ -35,19 +35,19 @@ type AdminAuditHandler struct {
 }
 
 type auditRow struct {
-	ID               int64    `json:"id"`
-	At               string   `json:"at"`
-	TraceID          *string  `json:"trace_id"`
-	MessageID        *string  `json:"message_id"`
-	Stage            string   `json:"stage"`
-	AppID            *string  `json:"app_id"`
-	Capability       *string  `json:"capability"`
-	CapabilitySetVer *int64   `json:"capability_set_ver"`
-	Endpoint         *string  `json:"endpoint"`
-	RouteStrategy    *string  `json:"route_strategy"`
-	DeliveryChannel  *string  `json:"delivery_channel"`
-	RecipientUserID  *int64   `json:"recipient_user_id"`
-	RecipientChatID  *int64   `json:"recipient_chat_id"`
+	ID               int64           `json:"id"`
+	At               string          `json:"at"`
+	TraceID          *string         `json:"trace_id"`
+	MessageID        *string         `json:"message_id"`
+	Stage            string          `json:"stage"`
+	AppID            *string         `json:"app_id"`
+	Capability       *string         `json:"capability"`
+	CapabilitySetVer *int64          `json:"capability_set_ver"`
+	Endpoint         *string         `json:"endpoint"`
+	RouteStrategy    *string         `json:"route_strategy"`
+	DeliveryChannel  *string         `json:"delivery_channel"`
+	RecipientUserID  *int64          `json:"recipient_user_id"`
+	RecipientChatID  *int64          `json:"recipient_chat_id"`
 	ErrorCode        *string         `json:"error_code"`
 	DetailsJSON      json.RawMessage `json:"details_json"`
 }

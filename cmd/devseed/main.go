@@ -8,10 +8,10 @@ import (
 )
 
 type devKey struct {
-	appID   string
-	prefix  string
+	appID     string
+	prefix    string
 	cleartext string
-	label   string
+	label     string
 }
 
 func main() {

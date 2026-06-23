@@ -90,22 +90,23 @@ func (p *Poller) dispatch(ctx context.Context, u Update) {
 
 func updateSummary(u Update) map[string]any {
 	out := map[string]any{}
-	if u.Message != nil {
+	switch {
+	case u.Message != nil:
 		out["kind"] = "message"
 		out["chat_id"] = u.Message.Chat.ID
 		out["from_id"] = 0
 		if u.Message.From != nil {
 			out["from_id"] = u.Message.From.ID
 		}
-	} else if u.MyChatMember != nil {
+	case u.MyChatMember != nil:
 		out["kind"] = "my_chat_member"
 		out["chat_id"] = u.MyChatMember.Chat.ID
-	} else if u.ChatMember != nil {
+	case u.ChatMember != nil:
 		out["kind"] = "chat_member"
 		out["chat_id"] = u.ChatMember.Chat.ID
-	} else if u.CallbackQuery != nil {
+	case u.CallbackQuery != nil:
 		out["kind"] = "callback_query"
-	} else {
+	default:
 		out["kind"] = "other"
 	}
 	return out

@@ -7,17 +7,17 @@ import (
 )
 
 type recordingHook struct {
-	name     string
-	stage    Stage
-	cont     bool
-	reason   string
-	err      error
-	called   *[]string
-	updates  map[string]any
+	name    string
+	stage   Stage
+	cont    bool
+	reason  string
+	err     error
+	called  *[]string
+	updates map[string]any
 }
 
-func (h *recordingHook) Name() string  { return h.name }
-func (h *recordingHook) Stage() Stage  { return h.stage }
+func (h *recordingHook) Name() string { return h.name }
+func (h *recordingHook) Stage() Stage { return h.stage }
 func (h *recordingHook) Run(_ context.Context, _ *Request) (Result, error) {
 	if h.called != nil {
 		*h.called = append(*h.called, h.name)

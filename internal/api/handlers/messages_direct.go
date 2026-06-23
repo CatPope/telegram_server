@@ -34,10 +34,10 @@ type recipientReport struct {
 }
 
 type directResponse struct {
-	MessageID  string             `json:"message_id"`
-	Delivered  int                `json:"delivered"`
-	Skipped    int                `json:"skipped"`
-	Failed     int                `json:"failed"`
+	MessageID  string            `json:"message_id"`
+	Delivered  int               `json:"delivered"`
+	Skipped    int               `json:"skipped"`
+	Failed     int               `json:"failed"`
 	Recipients []recipientReport `json:"recipients"`
 }
 

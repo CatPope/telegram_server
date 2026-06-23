@@ -40,10 +40,10 @@ func (s CapabilitySet) Add(c Capability) {
 }
 
 type RequesterIdentity struct {
-	AppID             string
-	Capabilities      CapabilitySet
-	CapabilitySetVer  int64
-	KeyPrefix         string
+	AppID            string
+	Capabilities     CapabilitySet
+	CapabilitySetVer int64
+	KeyPrefix        string
 }
 
 var ErrUnauthorized = errors.New("auth: unauthorized")

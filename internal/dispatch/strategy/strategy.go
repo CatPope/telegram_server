@@ -40,6 +40,6 @@ type RouteStrategy interface {
 }
 
 var (
-	ErrAppNotFound = errors.New("strategy: app_id unknown")
+	ErrAppNotFound     = errors.New("strategy: app_id unknown")
 	ErrEmptyRecipients = errors.New("strategy: recipients empty")
 )

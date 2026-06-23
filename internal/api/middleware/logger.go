@@ -72,11 +72,11 @@ func AccessLog(next http.Handler) http.Handler {
 		rec := &statusRecorder{ResponseWriter: w}
 		next.ServeHTTP(rec, r)
 		Log("info", "http_access", map[string]any{
-			"trace_id":   TraceID(r.Context()),
-			"method":     r.Method,
-			"path":       sanitizePath(r.URL.Path),
-			"status":     rec.status,
-			"bytes":      rec.bytes,
+			"trace_id":    TraceID(r.Context()),
+			"method":      r.Method,
+			"path":        sanitizePath(r.URL.Path),
+			"status":      rec.status,
+			"bytes":       rec.bytes,
 			"duration_ms": time.Since(start).Milliseconds(),
 		})
 	})

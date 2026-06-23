@@ -22,12 +22,12 @@ const (
 // StartHandler implements the /start and /agree commands plus the
 // post-agree onboarding step (issuing the startgroup deeplink).
 type StartHandler struct {
-	Bot          *telego.Bot
-	BotUsername  string
-	Users        *registry.UserStore
-	Supergroups  *registry.SupergroupStore
-	Audit        audit.Writer
-	TokenTTL     time.Duration
+	Bot         *telego.Bot
+	BotUsername string
+	Users       *registry.UserStore
+	Supergroups *registry.SupergroupStore
+	Audit       audit.Writer
+	TokenTTL    time.Duration
 }
 
 func (h *StartHandler) Name() string { return "start" }
@@ -99,9 +99,9 @@ func (h *StartHandler) handleAgree(ctx context.Context, u telego.Update) error {
 	}
 	if transitioned && h.Audit != nil {
 		_ = h.Audit.Write(ctx, audit.Event{
-			Stage:     audit.StageValidated,
-			Endpoint:  "/agree",
-			Details:   map[string]any{"telegram_id": from.ID, "user_id": user.ID},
+			Stage:    audit.StageValidated,
+			Endpoint: "/agree",
+			Details:  map[string]any{"telegram_id": from.ID, "user_id": user.ID},
 		})
 	}
 	chatID := telego.ChatID{ID: u.Message.Chat.ID}

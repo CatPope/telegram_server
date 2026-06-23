@@ -10,12 +10,12 @@ import (
 )
 
 const (
-	ResolveCodeUnknownRecipient    = "unknown_recipient"
-	ResolveCodeRecipientInactive   = "recipient_inactive"
-	ResolveCodeRecipientNotSubbed  = "recipient_not_subscribed"
-	ResolveCodeRecipientNotLinked  = "recipient_not_linked"
-	ResolveCodeTopicMissing        = "recipient_topic_missing"
-	ResolveCodeBotNotAdmin         = "bot_not_admin"
+	ResolveCodeUnknownRecipient   = "unknown_recipient"
+	ResolveCodeRecipientInactive  = "recipient_inactive"
+	ResolveCodeRecipientNotSubbed = "recipient_not_subscribed"
+	ResolveCodeRecipientNotLinked = "recipient_not_linked"
+	ResolveCodeTopicMissing       = "recipient_topic_missing"
+	ResolveCodeBotNotAdmin        = "bot_not_admin"
 )
 
 type DirectResolver interface {
@@ -76,12 +76,12 @@ func (r *PgDirectResolver) ResolveDirect(ctx context.Context, userIDs []int64, a
 	idx := 0
 	for rows.Next() {
 		var (
-			userID                  *int64
-			status                  *string
-			personalChatID          *int64
-			botIsAdmin              *bool
-			subscribed              bool
-			topicID                 *int64
+			userID         *int64
+			status         *string
+			personalChatID *int64
+			botIsAdmin     *bool
+			subscribed     bool
+			topicID        *int64
 		)
 		if scanErr := rows.Scan(&userID, &status, &personalChatID, &botIsAdmin, &subscribed, &topicID); scanErr != nil {
 			return ResolveResult{}, fmt.Errorf("direct resolver: scan: %w", scanErr)
