@@ -87,6 +87,7 @@ scripts/             smoke.sh, audit-retention.sh, dry-run-rollback.sh
 | 문서 | 내용 |
 |------|------|
 | [docs/api-spec.md](docs/api-spec.md) | REST API 명세 (요청/응답/에러/capability) |
+| [docs/api-client-guide.md](docs/api-client-guide.md) | 외부 앱 개발자용 간단 가이드 (메시지 발송 전용) |
 | [docs/prd.md](docs/prd.md) | 통합 설계 문서 (personal-supergroup 아키텍처) |
 | [docs/security-model.md](docs/security-model.md) | 인증 토큰 형식, capability 인가 모델 |
 | [docs/deployment.md](docs/deployment.md) | 배포 호스트 준비, GHCR, Tailscale, SSH |

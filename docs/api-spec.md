@@ -13,7 +13,7 @@ Base URL: `http://<host>:8080` (기본 `HTTP_LISTEN_ADDR=127.0.0.1:8080`)
 `GET /healthz`를 제외한 모든 엔드포인트는 Bearer 인증이 필요하다.
 
 ```
-Authorization: Bearer tg_<keyPrefix>_<secret>
+Authorization: Bearer tg_<prefix>_<secret>
 ```
 
 - 토큰 형식: `tg_` 접두사 + key prefix + `_` + secret (`internal/auth/store.go`)
