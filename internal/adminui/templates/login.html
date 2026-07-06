@@ -1,0 +1,10 @@
+{{define "content"}}
+<h1>Admin Login</h1>
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<form method="post" action="/login" class="card">
+  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+  <label for="password">Password</label>
+  <input type="password" id="password" name="password" autofocus required>
+  <button type="submit">Sign in</button>
+</form>
+{{end}}

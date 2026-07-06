@@ -1,0 +1,49 @@
+{{define "base"}}
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} — telegram_server Admin</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; margin: 0; display: flex; min-height: 100vh; }
+  nav { width: 200px; flex-shrink: 0; background: #1f2937; color: #fff; padding: 1.5rem 1rem; }
+  nav .brand { font-weight: 700; margin-bottom: 1.5rem; }
+  nav a { display: block; color: #d1d5db; text-decoration: none; padding: 0.5rem 0; }
+  nav a.active { color: #fff; font-weight: 600; }
+  nav a.disabled { color: #6b7280; pointer-events: none; }
+  main { flex: 1; padding: 2rem; }
+  .card { border: 1px solid #6b7280; border-radius: 8px; padding: 1.25rem; max-width: 480px; }
+  .status-ok { color: #16a34a; font-weight: 600; }
+  .status-bad { color: #dc2626; font-weight: 600; }
+  input { display: block; margin-bottom: 0.75rem; padding: 0.4rem; width: 100%; }
+  button { padding: 0.5rem 1rem; cursor: pointer; }
+  .error { color: #dc2626; margin-bottom: 1rem; }
+  form.logout { margin: 0; }
+  dt { color: #9ca3af; font-size: 0.85rem; }
+  dd { margin: 0 0 1rem; }
+</style>
+</head>
+<body>
+{{if .Authenticated}}
+<nav>
+  <div class="brand">telegram_server</div>
+  <a href="/" class="{{if eq .Active "dashboard"}}active{{end}}">Dashboard</a>
+  <a class="disabled">Apps</a>
+  <a class="disabled">Keys</a>
+  <a class="disabled">Users</a>
+  <a class="disabled">Audit</a>
+  <form class="logout" method="post" action="/logout">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <button type="submit">Logout</button>
+  </form>
+</nav>
+{{end}}
+<main>
+{{template "content" .}}
+</main>
+</body>
+</html>
+{{end}}

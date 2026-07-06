@@ -1,0 +1,9 @@
+{{define "content"}}
+<h1>Dashboard</h1>
+<div class="card">
+  <dt>Target server</dt>
+  <dd>{{.ServerURL}}</dd>
+  <dt>Health</dt>
+  <dd class="{{if eq .Health "OK"}}status-ok{{else}}status-bad{{end}}">{{.Health}}</dd>
+</div>
+{{end}}
