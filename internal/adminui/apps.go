@@ -58,6 +58,10 @@ var apiErrorMessages = map[string]string{
 	"unauthenticated":         "인증되지 않았습니다",
 	"rate_limited":            "요청이 너무 많습니다. 잠시 후 다시 시도하세요",
 	"db_error":                "서버 내부 오류가 발생했습니다",
+	"invalid_limit":           "limit은 1~500 사이 숫자여야 합니다",
+	"invalid_since":           "since는 RFC3339 형식이어야 합니다 (예: 2026-07-06T00:00:00Z)",
+	"invalid_until":           "until은 RFC3339 형식이어야 합니다 (예: 2026-07-06T00:00:00Z)",
+	"invalid_stage":           "stage 값이 올바르지 않습니다",
 }
 
 // friendlyAPIError renders an apiclient error for display on a page. It

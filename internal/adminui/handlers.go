@@ -37,6 +37,11 @@ type pageData struct {
 	// key_issued.html and exists nowhere else.
 	Keys         []KeyRow
 	PlaintextKey string
+
+	// Audit page (Phase A4).
+	AuditFilters AuditFilters
+	AuditStages  []string
+	AuditRows    []AuditDisplayRow
 }
 
 const healthCheckTimeout = 5 * time.Second

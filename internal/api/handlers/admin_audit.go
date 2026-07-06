@@ -26,6 +26,8 @@ var validAuditStages = map[audit.Stage]bool{
 	audit.StageIntrusionUnmitigated: true,
 	audit.StageBotNotAdmin:          true,
 	audit.StageTelegramAuthFailed:   true,
+	audit.StageKeyIssued:            true,
+	audit.StageKeyRevoked:           true,
 }
 
 // AdminAuditHandler handles audit log search.

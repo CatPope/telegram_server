@@ -278,7 +278,7 @@ Capability: `audit.search`
 | `since` / `until` | RFC3339 | `at >=` / `at <=` 필터 |
 | `trace_id` | string | 정확히 일치 |
 | `app_id` | string | 정확히 일치 |
-| `stage` | enum | `received`, `validated`, `dispatched`, `delivered`, `denied`, `retried`, `deferred`, `intrusion_kick`, `intrusion_unmitigated`, `bot_not_admin`, `telegram_auth_failed` |
+| `stage` | enum | `received`, `validated`, `dispatched`, `delivered`, `denied`, `retried`, `deferred`, `intrusion_kick`, `intrusion_unmitigated`, `bot_not_admin`, `telegram_auth_failed`, `key_issued`, `key_revoked` |
 
 결과는 `at DESC` 정렬. 필드 값 참고: `route_strategy` ∈ `direct` | `topic` | `broadcast-all` | `direct-dm` | `bot`(봇 내부 이벤트), `delivery_channel` ∈ `supergroup` | `dm` | `general`.
 

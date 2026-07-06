@@ -1,0 +1,51 @@
+{{define "content"}}
+<h1>Audit</h1>
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+
+<form method="get" action="/audit" class="card">
+  <label for="limit">Limit (1~500, 기본 50)</label>
+  <input type="text" id="limit" name="limit" value="{{.AuditFilters.Limit}}" inputmode="numeric">
+  <label for="since">Since (RFC3339, 예: 2026-07-06T00:00:00Z)</label>
+  <input type="text" id="since" name="since" value="{{.AuditFilters.Since}}">
+  <label for="until">Until (RFC3339)</label>
+  <input type="text" id="until" name="until" value="{{.AuditFilters.Until}}">
+  <label for="trace_id">Trace ID</label>
+  <input type="text" id="trace_id" name="trace_id" value="{{.AuditFilters.TraceID}}">
+  <label for="app_id">App ID</label>
+  <input type="text" id="app_id" name="app_id" value="{{.AuditFilters.AppID}}">
+  <label for="stage">Stage</label>
+  <select id="stage" name="stage">
+    <option value="">(전체)</option>
+    {{$selected := .AuditFilters.Stage}}
+    {{range .AuditStages}}
+    <option value="{{.}}"{{if eq . $selected}} selected{{end}}>{{.}}</option>
+    {{end}}
+  </select>
+  <button type="submit">검색</button>
+</form>
+
+<table>
+  <thead>
+    <tr>
+      <th>At</th><th>Stage</th><th>App</th><th>Endpoint</th>
+      <th>Channel</th><th>Recipient</th><th>Error</th><th>Trace ID</th>
+    </tr>
+  </thead>
+  <tbody>
+  {{range .AuditRows}}
+  <tr>
+    <td>{{.At}}</td>
+    <td>{{.Stage}}</td>
+    <td>{{.AppID}}</td>
+    <td>{{.Endpoint}}</td>
+    <td>{{.DeliveryChannel}}</td>
+    <td>{{.Recipient}}</td>
+    <td>{{if .ErrorCode}}<span class="status-bad">{{.ErrorCode}}</span>{{end}}</td>
+    <td><code>{{.TraceID}}</code></td>
+  </tr>
+  {{else}}
+  <tr><td colspan="8">결과가 없습니다</td></tr>
+  {{end}}
+  </tbody>
+</table>
+{{end}}

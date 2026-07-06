@@ -57,5 +57,26 @@ services:
     ports:
       - "127.0.0.1:8080:8080"
 
+  adminui:
+    build:
+      context: .
+      dockerfile: Dockerfile.adminui
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      app:
+        condition: service_started
+    environment:
+      # Placeholder password, same convention as TELEGRAM_BOT_TOKEN above —
+      # operators must override via .env before exposing beyond loopback.
+      ADMINUI_PASSWORD: ${ADMINUI_PASSWORD:-change-me-admin-pw}
+      # Dev seed admin key (cmd/devseed). Override via .env in staging/prod.
+      ADMINUI_API_KEY: ${ADMINUI_API_KEY:-tg_devadmin_0123456789abcdef0123456789abcdef}
+      ADMINUI_LISTEN_ADDR: "0.0.0.0:8081"
+      TELEGRAM_SERVER_URL: http://app:8080
+      DATABASE_URL: postgres://telegram:telegram@postgres:5432/telegram_server?sslmode=disable
+    ports:
+      - "127.0.0.1:8081:8081"
+
 volumes:
   pgdata: {}

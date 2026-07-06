@@ -46,7 +46,7 @@
   <a href="/" class="{{if eq .Active "dashboard"}}active{{end}}">Dashboard</a>
   <a href="/apps" class="{{if eq .Active "apps"}}active{{end}}">Apps</a>
   <a href="/users" class="{{if eq .Active "users"}}active{{end}}">Users</a>
-  <a class="disabled">Audit</a>
+  <a href="/audit" class="{{if eq .Active "audit"}}active{{end}}">Audit</a>
   <form class="logout" method="post" action="/logout">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
     <button type="submit">Logout</button>
