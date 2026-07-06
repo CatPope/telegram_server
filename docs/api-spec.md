@@ -204,11 +204,13 @@ Capability: `apps.register`. 모든 필드 선택(부분 갱신):
 ```
 
 - capability 추가/제거 시 `capability_set_version`이 +1 된다 (키 캐시 무효화).
+- `add_capabilities`는 등록(4.1)과 동일한 규칙으로 검증된다 — 관리 cap 추가 시도는 403, 미지의 이름은 400. `remove_capabilities`는 검증하지 않는다 (미지 이름 제거는 no-op, 관리 cap 제거는 권한 축소라 허용).
 
 | 상태 | 응답 |
 |------|------|
 | 200 | `{"id":"<id>","updated":true}` |
-| 400 | `malformed_json` / `invalid_min_grade` |
+| 400 | `malformed_json` / `invalid_min_grade` / `unknown_capability` |
+| 403 | `forbidden_capability` |
 | 404 | `app_not_found` |
 | 500 | `db_error` |
 

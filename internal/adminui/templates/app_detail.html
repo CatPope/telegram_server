@@ -1,0 +1,51 @@
+{{define "content"}}
+<h1>App: {{.Title}}</h1>
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+{{if .Success}}<p class="success">{{.Success}}</p>{{end}}
+{{if .App}}
+<dl class="card">
+  <dt>Name</dt><dd>{{.App.Name}}</dd>
+  <dt>Description</dt><dd>{{.App.Description}}</dd>
+  <dt>Min Grade</dt><dd>{{.App.MinGrade}}</dd>
+  <dt>Active</dt><dd>{{if .App.Active}}<span class="status-ok">active</span>{{else}}<span class="status-bad">inactive</span>{{end}}</dd>
+  <dt>Capabilities</dt><dd>{{range .App.Capabilities}}{{.}} {{else}}(none){{end}}</dd>
+</dl>
+{{end}}
+
+{{if .DBUnavailable}}
+<p>DB 미연결 상태에서는 현재 값을 확인할 수 없어 수정/비활성화 폼을 표시하지 않습니다. <code>DATABASE_URL</code> 연결 후 다시 시도하세요.</p>
+{{else}}
+<h2>수정</h2>
+<form method="post" action="/apps/{{.AppID}}/patch" class="card">
+  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+  <label for="description">Description</label>
+  <input type="text" id="description" name="description" value="{{if .App}}{{.App.Description}}{{end}}">
+  <label for="min_grade">Min Grade</label>
+  <select id="min_grade" name="min_grade">
+    <option value="user" {{if .App}}{{if eq .App.MinGrade "user"}}selected{{end}}{{end}}>user</option>
+    <option value="developer" {{if .App}}{{if eq .App.MinGrade "developer"}}selected{{end}}{{end}}>developer</option>
+    <option value="admin" {{if .App}}{{if eq .App.MinGrade "admin"}}selected{{end}}{{end}}>admin</option>
+  </select>
+  <label><input type="checkbox" name="active" {{if .App}}{{if .App.Active}}checked{{end}}{{end}}> Active</label>
+  <fieldset>
+    <legend>Add capabilities</legend>
+    {{range .GrantableCapabilities}}
+    <label><input type="checkbox" name="add_capabilities" value="{{.}}"> {{.}}</label>
+    {{end}}
+  </fieldset>
+  <fieldset>
+    <legend>Remove capabilities</legend>
+    {{range .GrantableCapabilities}}
+    <label><input type="checkbox" name="remove_capabilities" value="{{.}}"> {{.}}</label>
+    {{end}}
+  </fieldset>
+  <button type="submit">저장</button>
+</form>
+
+<h2>비활성화</h2>
+<form method="post" action="/apps/{{.AppID}}/deactivate">
+  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+  <button type="submit">비활성화</button>
+</form>
+{{end}}
+{{end}}

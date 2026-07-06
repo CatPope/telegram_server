@@ -21,9 +21,18 @@
   input { display: block; margin-bottom: 0.75rem; padding: 0.4rem; width: 100%; }
   button { padding: 0.5rem 1rem; cursor: pointer; }
   .error { color: #dc2626; margin-bottom: 1rem; }
+  .success { color: #16a34a; margin-bottom: 1rem; }
   form.logout { margin: 0; }
   dt { color: #9ca3af; font-size: 0.85rem; }
   dd { margin: 0 0 1rem; }
+  table { border-collapse: collapse; width: 100%; max-width: 900px; }
+  th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #6b7280; }
+  fieldset { border: 1px solid #6b7280; border-radius: 8px; margin-bottom: 1rem; max-width: 480px; }
+  fieldset label { display: block; font-weight: normal; margin-bottom: 0.25rem; }
+  fieldset label input[type="checkbox"] { display: inline; width: auto; margin-right: 0.4rem; }
+  select, textarea { display: block; margin-bottom: 0.75rem; padding: 0.4rem; width: 100%; }
+  .actions { margin: 1rem 0; }
+  a.button { display: inline-block; padding: 0.5rem 1rem; text-decoration: none; border: 1px solid #6b7280; border-radius: 4px; }
 </style>
 </head>
 <body>
@@ -31,9 +40,9 @@
 <nav>
   <div class="brand">telegram_server</div>
   <a href="/" class="{{if eq .Active "dashboard"}}active{{end}}">Dashboard</a>
-  <a class="disabled">Apps</a>
+  <a href="/apps" class="{{if eq .Active "apps"}}active{{end}}">Apps</a>
   <a class="disabled">Keys</a>
-  <a class="disabled">Users</a>
+  <a href="/users" class="{{if eq .Active "users"}}active{{end}}">Users</a>
   <a class="disabled">Audit</a>
   <form class="logout" method="post" action="/logout">
     <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">

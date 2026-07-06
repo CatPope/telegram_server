@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/CatPope/telegram_server/internal/adminui"
 	"github.com/CatPope/telegram_server/internal/api/middleware"
 )
@@ -29,7 +31,23 @@ func run() error {
 		return fmt.Errorf("config: %w", err)
 	}
 
-	handler, err := adminui.NewServer(cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// DATABASE_URL is optional in Phase A2 — the apps list/detail pages
+	// need it for read-only queries (no "list apps" API exists), but the
+	// UI starts fine without it and shows a "DB not connected" notice.
+	var store adminui.Store
+	if cfg.DatabaseURL != "" {
+		pool, poolErr := pgxpool.New(ctx, cfg.DatabaseURL)
+		if poolErr != nil {
+			return fmt.Errorf("db: %w", poolErr)
+		}
+		defer pool.Close()
+		store = adminui.NewStore(pool)
+	}
+
+	handler, err := adminui.NewServer(cfg, store)
 	if err != nil {
 		return fmt.Errorf("server: %w", err)
 	}

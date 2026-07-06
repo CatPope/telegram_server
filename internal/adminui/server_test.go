@@ -24,7 +24,7 @@ func TestDashboardRedirectsWithoutSession(t *testing.T) {
 	}))
 	defer target.Close()
 
-	handler, err := NewServer(testConfig(t, target.URL))
+	handler, err := NewServer(testConfig(t, target.URL), nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestLoginPageRendersCSRFCookieAndForm(t *testing.T) {
 	}))
 	defer target.Close()
 
-	handler, err := NewServer(testConfig(t, target.URL))
+	handler, err := NewServer(testConfig(t, target.URL), nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestLoginFlowSuccessThenDashboardThenLogout(t *testing.T) {
 	defer target.Close()
 
 	cfg := testConfig(t, target.URL)
-	handler, err := NewServer(cfg)
+	handler, err := NewServer(cfg, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestLoginFailureWrongPassword(t *testing.T) {
 	defer target.Close()
 
 	cfg := testConfig(t, target.URL)
-	handler, err := NewServer(cfg)
+	handler, err := NewServer(cfg, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestLoginRateLimited(t *testing.T) {
 	defer target.Close()
 
 	cfg := testConfig(t, target.URL)
-	handler, err := NewServer(cfg)
+	handler, err := NewServer(cfg, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}

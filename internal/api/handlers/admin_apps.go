@@ -226,6 +226,20 @@ func (h *AdminAppsHandler) Patch(w http.ResponseWriter, r *http.Request) {
 		deny("invalid_min_grade", http.StatusBadRequest)
 		return
 	}
+	// Same grant rules as Create: management capabilities can never be
+	// added via the API, and unknown names are rejected. Removals are not
+	// gated — deleting an unknown capability is a no-op and stripping a
+	// management capability only ever de-escalates.
+	for _, c := range req.AddCapabilities {
+		if forbiddenCapabilities[c] {
+			deny("forbidden_capability", http.StatusForbidden)
+			return
+		}
+		if !allowedCapabilities[c] {
+			deny("unknown_capability", http.StatusBadRequest)
+			return
+		}
+	}
 
 	ctx := r.Context()
 	tx, err := h.Pool.Begin(ctx)

@@ -1,0 +1,26 @@
+{{define "content"}}
+<h1>앱 등록</h1>
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<form method="post" action="/apps" class="card">
+  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+  <label for="id">ID</label>
+  <input type="text" id="id" name="id" pattern="[a-z0-9][a-z0-9_-]{2,63}" required autofocus>
+  <label for="name">Name</label>
+  <input type="text" id="name" name="name" required>
+  <label for="description">Description</label>
+  <input type="text" id="description" name="description">
+  <label for="min_grade">Min Grade</label>
+  <select id="min_grade" name="min_grade">
+    <option value="user">user</option>
+    <option value="developer">developer</option>
+    <option value="admin">admin</option>
+  </select>
+  <fieldset>
+    <legend>Capabilities</legend>
+    {{range .GrantableCapabilities}}
+    <label><input type="checkbox" name="capabilities" value="{{.}}"> {{.}}</label>
+    {{end}}
+  </fieldset>
+  <button type="submit">등록</button>
+</form>
+{{end}}

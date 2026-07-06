@@ -20,8 +20,18 @@ type pageData struct {
 	Authenticated bool
 	CSRFToken     string
 	Error         string
+	Success       string
 	Health        string
 	ServerURL     string
+
+	// Apps/Users pages (Phase A2).
+	Apps                  []App
+	App                   *App
+	AppID                 string // the {id} path param, set even when App (DB row) is unavailable
+	DBUnavailable         bool
+	GrantableCapabilities []string
+	TelegramID            string
+	UnsubAppID            string
 }
 
 const healthCheckTimeout = 5 * time.Second

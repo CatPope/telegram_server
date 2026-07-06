@@ -1,0 +1,50 @@
+{{define "content"}}
+<h1>Users</h1>
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+{{if .Success}}<p class="success">{{.Success}}</p>{{end}}
+
+<h2>텔레그램 ID 조회</h2>
+<form method="get" action="/users" class="card">
+  <label for="telegram_id">Telegram ID</label>
+  <input type="text" id="telegram_id" name="telegram_id" value="{{.TelegramID}}" required>
+  <button type="submit">조회</button>
+</form>
+
+{{if .TelegramID}}
+<h2>등급 변경</h2>
+<form method="post" action="/users/{{.TelegramID}}/grade" class="card">
+  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+  <label for="grade">Grade</label>
+  <select id="grade" name="grade">
+    <option value="user">user</option>
+    <option value="developer">developer</option>
+    <option value="admin">admin</option>
+  </select>
+  <button type="submit">변경</button>
+</form>
+
+<h2>구독 추가</h2>
+<form method="post" action="/users/{{.TelegramID}}/subscriptions" class="card">
+  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+  <label for="app_id">App ID</label>
+  <input type="text" id="app_id" name="app_id" required>
+  <button type="submit">구독 추가</button>
+</form>
+
+<h2>구독 해제</h2>
+<form method="get" action="/users" class="card">
+  <input type="hidden" name="telegram_id" value="{{.TelegramID}}">
+  <label for="unsub_app_id">App ID</label>
+  <input type="text" id="unsub_app_id" name="app_id" value="{{.UnsubAppID}}" required>
+  <button type="submit">해제 대상 확인</button>
+</form>
+
+{{if .UnsubAppID}}
+<form method="post" action="/users/{{.TelegramID}}/subscriptions/{{.UnsubAppID}}/delete" class="card">
+  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+  <p>Telegram ID <strong>{{.TelegramID}}</strong>의 <strong>{{.UnsubAppID}}</strong> 구독을 해제합니다.</p>
+  <button type="submit">구독 해제 확정</button>
+</form>
+{{end}}
+{{end}}
+{{end}}

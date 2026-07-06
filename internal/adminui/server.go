@@ -14,12 +14,15 @@ type Server struct {
 	sessions *SessionManager
 	limiter  *loginLimiter
 	client   *apiclient.Client
+	store    Store
 }
 
 // NewServer wires the admin UI's chi router. It reuses telegram_server's
 // own RequestID/Recover/AccessLog middleware so admin UI requests log in
-// the same shape as the main API.
-func NewServer(cfg Config) (http.Handler, error) {
+// the same shape as the main API. store may be nil (DATABASE_URL unset) —
+// the apps pages degrade to a "DB not connected" notice rather than
+// failing to start.
+func NewServer(cfg Config, store Store) (http.Handler, error) {
 	sm, err := NewSessionManager(cfg.CookieSecure)
 	if err != nil {
 		return nil, err
@@ -30,6 +33,7 @@ func NewServer(cfg Config) (http.Handler, error) {
 		sessions: sm,
 		limiter:  newLoginLimiter(),
 		client:   apiclient.New(cfg.TelegramServerURL, cfg.APIKey),
+		store:    store,
 	}
 
 	r := chi.NewRouter()
@@ -45,6 +49,18 @@ func NewServer(cfg Config) (http.Handler, error) {
 		r.Use(sm.Middleware)
 		r.Get("/", s.handleDashboard)
 		r.With(RequireCSRF(sm)).Post("/logout", s.handleLogout)
+
+		r.Get("/apps", s.handleAppsList)
+		r.Get("/apps/new", s.handleAppNewForm)
+		r.With(RequireCSRF(sm)).Post("/apps", s.handleAppCreate)
+		r.Get("/apps/{id}", s.handleAppDetail)
+		r.With(RequireCSRF(sm)).Post("/apps/{id}/patch", s.handleAppPatch)
+		r.With(RequireCSRF(sm)).Post("/apps/{id}/deactivate", s.handleAppDeactivate)
+
+		r.Get("/users", s.handleUsersPage)
+		r.With(RequireCSRF(sm)).Post("/users/{id}/grade", s.handleUserGrade)
+		r.With(RequireCSRF(sm)).Post("/users/{id}/subscriptions", s.handleUserSubscribe)
+		r.With(RequireCSRF(sm)).Post("/users/{id}/subscriptions/{app}/delete", s.handleUserUnsubscribe)
 	})
 
 	return r, nil
