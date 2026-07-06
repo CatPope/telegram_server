@@ -53,6 +53,7 @@ next_phase: <N+1>
 | 5 | success | v1 | [phase-5-v1.md](phase-5-v1.md) | `dea09da`, `bf41316`, `0fe4eba` |
 | 6 | success | v1 | [phase-6-v1.md](phase-6-v1.md) | `d51d8c5`, `2d45461`, `a8462c5` |
 | 7 | success | v1 | [phase-7-v1.md](phase-7-v1.md) | `91d7eb4`, `fd17c5d`, `ae652a5` |
+| a1 (admin UI) | success | v1 | [phase-a1-v1.md](phase-a1-v1.md) | `3b1a3a7` |
 
 ## 상태(status) 의미
 
