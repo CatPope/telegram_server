@@ -81,6 +81,77 @@ func TestSessionIssueAndMiddleware(t *testing.T) {
 	}
 }
 
+func TestSessionRevokeInvalidatesVerify(t *testing.T) {
+	sm := newTestSessionManager(t)
+	rec := httptest.NewRecorder()
+	nonce, err := sm.Issue(rec)
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	cookie := rec.Result().Cookies()[0]
+
+	if _, ok := sm.verify(cookie.Value); !ok {
+		t.Fatal("expected cookie to verify before revocation")
+	}
+	sm.Revoke(nonce)
+	if _, ok := sm.verify(cookie.Value); ok {
+		t.Error("expected verify to fail after server-side revocation")
+	}
+}
+
+func TestSessionRevokeSweepsExpiredEntries(t *testing.T) {
+	sm := newTestSessionManager(t)
+	sm.revoked["stale"] = time.Now().Add(-time.Minute)
+
+	sm.Revoke("fresh")
+
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if _, ok := sm.revoked["stale"]; ok {
+		t.Error("expected the expired entry to be swept")
+	}
+	if _, ok := sm.revoked["fresh"]; !ok {
+		t.Error("expected the fresh entry to be retained")
+	}
+}
+
+func TestGlobalBackoffBlocksAfterThresholdAndResets(t *testing.T) {
+	current := time.Unix(1000, 0)
+	g := newGlobalBackoff()
+	g.now = func() time.Time { return current }
+
+	for i := 0; i < globalBackoffThreshold-1; i++ {
+		g.RecordFailure()
+	}
+	if !g.Allow() {
+		t.Fatal("expected attempts below the threshold to be allowed")
+	}
+	g.RecordFailure() // threshold reached
+	if g.Allow() {
+		t.Fatal("expected attempts to be blocked at the threshold")
+	}
+
+	current = current.Add(globalBackoffDelay + time.Second)
+	if !g.Allow() {
+		t.Fatal("expected the block to lapse after the delay")
+	}
+
+	// Any further failure while still over the threshold re-arms the block.
+	g.RecordFailure()
+	if g.Allow() {
+		t.Fatal("expected another failure past the threshold to re-block")
+	}
+
+	g.RecordSuccess()
+	if !g.Allow() {
+		t.Error("expected success to reset the backoff")
+	}
+	g.RecordFailure()
+	if !g.Allow() {
+		t.Error("expected a single failure after reset to be allowed")
+	}
+}
+
 func TestLoginLimiterAllowsThenBlocks(t *testing.T) {
 	l := newLoginLimiter()
 	for i := 0; i < int(loginRateLimit); i++ {

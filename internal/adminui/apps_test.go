@@ -72,7 +72,7 @@ func TestAppsListShowsDBUnavailableWithoutStore(t *testing.T) {
 	defer target.Close()
 
 	cfg := testConfig(t, target.URL)
-	handler, err := NewServer(cfg, nil)
+	handler, err := NewServer(cfg, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestAppsListRendersAppsFromStore(t *testing.T) {
 	store := &fakeStore{apps: map[string]App{
 		"ci-notifier": {ID: "ci-notifier", Name: "CI Notifier", MinGrade: "user", Active: true, Capabilities: []string{"messages.direct.send"}},
 	}}
-	handler, err := NewServer(cfg, store)
+	handler, err := NewServer(cfg, store, nil, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestAppDetailNotFound(t *testing.T) {
 	defer target.Close()
 
 	cfg := testConfig(t, target.URL)
-	handler, err := NewServer(cfg, &fakeStore{apps: map[string]App{}})
+	handler, err := NewServer(cfg, &fakeStore{apps: map[string]App{}}, nil, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestAppCreateWithoutCSRFIsForbidden(t *testing.T) {
 	defer target.Close()
 
 	cfg := testConfig(t, target.URL)
-	handler, err := NewServer(cfg, nil)
+	handler, err := NewServer(cfg, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestAppPatchAndDeactivateSuccess(t *testing.T) {
 	store := &fakeStore{apps: map[string]App{
 		"ci-notifier": {ID: "ci-notifier", Name: "CI Notifier", MinGrade: "user", Active: true},
 	}}
-	handler, err := NewServer(cfg, store)
+	handler, err := NewServer(cfg, store, nil, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestAppDetailDBUnavailableHidesForms(t *testing.T) {
 	defer target.Close()
 
 	cfg := testConfig(t, target.URL)
-	handler, err := NewServer(cfg, nil)
+	handler, err := NewServer(cfg, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -303,7 +303,7 @@ func TestAppCreateMapsServerErrorToFriendlyMessage(t *testing.T) {
 	defer target.Close()
 
 	cfg := testConfig(t, target.URL)
-	handler, err := NewServer(cfg, nil)
+	handler, err := NewServer(cfg, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}

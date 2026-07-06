@@ -1,0 +1,11 @@
+{{define "content"}}
+<h1>키 발급 완료</h1>
+<p class="success">새 API 키가 발급되었습니다.</p>
+<div class="card">
+  <p><strong>이 평문 키는 지금 딱 한 번만 표시됩니다.</strong>
+  이 페이지를 벗어나면 다시 볼 수 없습니다 — 서버에는 해시만 저장되며,
+  분실 시 폐기 후 재발급해야 합니다. 지금 안전한 곳에 복사하세요.</p>
+  <p><code class="key-plain">{{.PlaintextKey}}</code></p>
+</div>
+<p class="actions"><a class="button" href="/apps/{{.AppID}}/keys">키 목록으로</a></p>
+{{end}}

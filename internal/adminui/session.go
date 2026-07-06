@@ -22,9 +22,14 @@ const (
 // SessionManager signs and verifies the operator's login cookie with an
 // HMAC key generated fresh at process startup — no session store needed,
 // restarting the binary simply invalidates every outstanding cookie.
+// Logout additionally revokes the session server-side (revoked set), so a
+// captured cookie stops working the moment the operator logs out.
 type SessionManager struct {
 	secret []byte
 	secure bool
+
+	mu      sync.Mutex
+	revoked map[string]time.Time // logged-out nonce → sweep-after time
 }
 
 func NewSessionManager(secureCookies bool) (*SessionManager, error) {
@@ -32,7 +37,37 @@ func NewSessionManager(secureCookies bool) (*SessionManager, error) {
 	if _, err := rand.Read(secret); err != nil {
 		return nil, fmt.Errorf("adminui: generate session secret: %w", err)
 	}
-	return &SessionManager{secret: secret, secure: secureCookies}, nil
+	return &SessionManager{
+		secret:  secret,
+		secure:  secureCookies,
+		revoked: make(map[string]time.Time),
+	}, nil
+}
+
+// Revoke invalidates a session server-side. The cookie's HMAC stays valid
+// until its expiry, so verify() also consults this set. Entries older than
+// the maximum possible cookie lifetime are swept lazily on each call —
+// a single-operator UI never accumulates more than a handful.
+func (sm *SessionManager) Revoke(nonce string) {
+	if nonce == "" {
+		return
+	}
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	now := time.Now()
+	for n, sweepAfter := range sm.revoked {
+		if now.After(sweepAfter) {
+			delete(sm.revoked, n)
+		}
+	}
+	sm.revoked[nonce] = now.Add(sessionTTL)
+}
+
+func (sm *SessionManager) isRevoked(nonce string) bool {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	_, ok := sm.revoked[nonce]
+	return ok
 }
 
 // Issue signs and sets a fresh session cookie, returning the session nonce
@@ -120,6 +155,9 @@ func (sm *SessionManager) verify(value string) (nonce string, ok bool) {
 	if time.Now().Unix() > expiry {
 		return "", false
 	}
+	if sm.isRevoked(nonce) {
+		return "", false
+	}
 	return nonce, true
 }
 
@@ -157,6 +195,18 @@ func (l *loginLimiter) Allow(key string) bool {
 	defer l.mu.Unlock()
 
 	now := time.Now()
+	// Lazy sweep (same pattern as the session revoked map): a bucket that
+	// has refilled to full carries no state, so drop it rather than letting
+	// one entry per client IP accumulate forever.
+	for k, b := range l.buckets {
+		if k == key {
+			continue
+		}
+		refill := now.Sub(b.lastFill).Seconds() * (loginRateLimit / loginRateWindow.Seconds())
+		if b.tokens+refill >= loginRateLimit {
+			delete(l.buckets, k)
+		}
+	}
 	b, ok := l.buckets[key]
 	if !ok {
 		b = &loginBucket{tokens: loginRateLimit, lastFill: now}
@@ -172,4 +222,56 @@ func (l *loginLimiter) Allow(key string) bool {
 	}
 	b.tokens--
 	return true
+}
+
+// globalBackoff is a second, IP-agnostic brake on login brute force:
+// after globalBackoffThreshold consecutive failures (across all IPs),
+// every further attempt is rejected until globalBackoffDelay has passed
+// since the most recent failure. A successful login resets it, and the
+// failure streak decays after globalBackoffDecay of quiet — an operator's
+// occasional typo weeks apart must never accumulate into a lockout. This
+// bounds distributed guessing the per-IP bucket can't see.
+type globalBackoff struct {
+	mu           sync.Mutex
+	failures     int
+	lastFailure  time.Time
+	blockedUntil time.Time
+	now          func() time.Time // injectable for tests
+}
+
+const (
+	globalBackoffThreshold = 20
+	globalBackoffDelay     = 30 * time.Second
+	globalBackoffDecay     = 10 * time.Minute
+)
+
+func newGlobalBackoff() *globalBackoff {
+	return &globalBackoff{now: time.Now}
+}
+
+func (g *globalBackoff) Allow() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return !g.now().Before(g.blockedUntil)
+}
+
+func (g *globalBackoff) RecordFailure() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	now := g.now()
+	if !g.lastFailure.IsZero() && now.Sub(g.lastFailure) >= globalBackoffDecay {
+		g.failures = 0
+	}
+	g.lastFailure = now
+	g.failures++
+	if g.failures >= globalBackoffThreshold {
+		g.blockedUntil = now.Add(globalBackoffDelay)
+	}
+}
+
+func (g *globalBackoff) RecordSuccess() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.failures = 0
+	g.blockedUntil = time.Time{}
 }

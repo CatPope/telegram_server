@@ -15,6 +15,7 @@ import (
 
 	"github.com/CatPope/telegram_server/internal/adminui"
 	"github.com/CatPope/telegram_server/internal/api/middleware"
+	"github.com/CatPope/telegram_server/internal/audit"
 )
 
 func main() {
@@ -34,10 +35,13 @@ func run() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// DATABASE_URL is optional in Phase A2 — the apps list/detail pages
-	// need it for read-only queries (no "list apps" API exists), but the
-	// UI starts fine without it and shows a "DB not connected" notice.
+	// DATABASE_URL is optional — the apps pages need it for read-only
+	// queries (no "list apps" API exists) and the keys pages for the one
+	// direct write (app_keys issue/revoke, Phase A3), but the UI starts
+	// fine without it and shows a "DB not connected" notice.
 	var store adminui.Store
+	var keys adminui.KeyStore
+	var auditW audit.Writer
 	if cfg.DatabaseURL != "" {
 		pool, poolErr := pgxpool.New(ctx, cfg.DatabaseURL)
 		if poolErr != nil {
@@ -45,11 +49,20 @@ func run() error {
 		}
 		defer pool.Close()
 		store = adminui.NewStore(pool)
+		keys = adminui.NewKeyStore(pool)
+		auditW = audit.NewPgWriter(pool)
 	}
 
-	handler, err := adminui.NewServer(cfg, store)
+	handler, err := adminui.NewServer(cfg, store, keys, auditW)
 	if err != nil {
 		return fmt.Errorf("server: %w", err)
+	}
+
+	if !cfg.CookieSecure && !cfg.ListensLoopbackOnly() {
+		middleware.Log("warn", "adminui_insecure_cookies_on_public_addr", map[string]any{
+			"addr": cfg.ListenAddr,
+			"hint": "set ADMINUI_COOKIE_SECURE=true behind TLS, or bind to 127.0.0.1",
+		})
 	}
 
 	srv := &http.Server{

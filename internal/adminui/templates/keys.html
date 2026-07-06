@@ -1,0 +1,46 @@
+{{define "content"}}
+<h1>Keys: {{.AppID}}</h1>
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+{{if .Success}}<p class="success">{{.Success}}</p>{{end}}
+
+{{if .DBUnavailable}}
+<p>키 관리는 DB 연결이 필요합니다. <code>DATABASE_URL</code> 설정 후 다시 시도하세요.</p>
+{{else}}
+<table>
+  <thead><tr><th>Prefix</th><th>Label</th><th>발급일</th><th>상태</th><th>폐기</th></tr></thead>
+  <tbody>
+  {{range .Keys}}
+  <tr>
+    <td><code>{{.Prefix}}</code></td>
+    <td>{{.Label}}</td>
+    <td>{{.CreatedAt.Format "2006-01-02 15:04"}}</td>
+    <td>{{if .RevokedAt}}<span class="status-bad">revoked</span>{{else}}<span class="status-ok">active</span>{{end}}</td>
+    <td>
+      {{if not .RevokedAt}}
+      <form method="post" action="/apps/{{$.AppID}}/keys/{{.Prefix}}/revoke" class="inline">
+        <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+        <label><input type="checkbox" name="confirm" value="1" required> 확인</label>
+        <button type="submit">폐기</button>
+      </form>
+      {{end}}
+    </td>
+  </tr>
+  {{else}}
+  <tr><td colspan="5">발급된 키가 없습니다</td></tr>
+  {{end}}
+  </tbody>
+</table>
+
+<h2>새 키 발급</h2>
+<form method="post" action="/apps/{{.AppID}}/keys" class="card">
+  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+  <label for="prefix">Prefix (영소문자/숫자 4~16자)</label>
+  <input type="text" id="prefix" name="prefix" required pattern="[a-z0-9]{4,16}">
+  <label for="label">Label (선택)</label>
+  <input type="text" id="label" name="label">
+  <button type="submit">발급</button>
+</form>
+{{end}}
+
+<p class="actions"><a class="button" href="/apps/{{.AppID}}">← 앱 상세</a></p>
+{{end}}

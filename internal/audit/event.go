@@ -20,6 +20,10 @@ const (
 	StageIntrusionUnmitigated Stage = "intrusion_unmitigated"
 	StageBotNotAdmin          Stage = "bot_not_admin"
 	StageTelegramAuthFailed   Stage = "telegram_auth_failed"
+	// Admin UI key lifecycle (Phase A3). Details carry key_prefix only —
+	// never plaintext or hash material.
+	StageKeyIssued  Stage = "key_issued"
+	StageKeyRevoked Stage = "key_revoked"
 )
 
 type DeliveryChannel string

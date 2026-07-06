@@ -12,6 +12,8 @@
 </dl>
 {{end}}
 
+<p class="actions"><a class="button" href="/apps/{{.AppID}}/keys">키 관리</a></p>
+
 {{if .DBUnavailable}}
 <p>DB 미연결 상태에서는 현재 값을 확인할 수 없어 수정/비활성화 폼을 표시하지 않습니다. <code>DATABASE_URL</code> 연결 후 다시 시도하세요.</p>
 {{else}}

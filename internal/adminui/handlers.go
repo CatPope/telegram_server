@@ -32,6 +32,11 @@ type pageData struct {
 	GrantableCapabilities []string
 	TelegramID            string
 	UnsubAppID            string
+
+	// Keys pages (Phase A3). PlaintextKey is rendered exactly once on
+	// key_issued.html and exists nowhere else.
+	Keys         []KeyRow
+	PlaintextKey string
 }
 
 const healthCheckTimeout = 5 * time.Second
@@ -60,9 +65,14 @@ func (s *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"rate_limited"}`, http.StatusTooManyRequests)
 		return
 	}
+	if !s.backoff.Allow() {
+		http.Error(w, `{"error":"rate_limited"}`, http.StatusTooManyRequests)
+		return
+	}
 
 	password := r.FormValue("password")
 	if subtle.ConstantTimeCompare([]byte(password), []byte(s.cfg.Password)) != 1 {
+		s.backoff.RecordFailure()
 		middleware.Log("info", "adminui_login_failed", map[string]any{
 			"trace_id": middleware.TraceID(r.Context()),
 			"ip":       ip,
@@ -70,6 +80,7 @@ func (s *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login?error=1", http.StatusSeeOther)
 		return
 	}
+	s.backoff.RecordSuccess()
 
 	if _, err := s.sessions.Issue(w); err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
@@ -79,6 +90,7 @@ func (s *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	s.sessions.Revoke(SessionNonce(r.Context()))
 	s.sessions.Clear(w)
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }

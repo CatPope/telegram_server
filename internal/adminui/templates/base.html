@@ -33,6 +33,10 @@
   select, textarea { display: block; margin-bottom: 0.75rem; padding: 0.4rem; width: 100%; }
   .actions { margin: 1rem 0; }
   a.button { display: inline-block; padding: 0.5rem 1rem; text-decoration: none; border: 1px solid #6b7280; border-radius: 4px; }
+  code.key-plain { display: block; word-break: break-all; font-size: 1.05rem; padding: 0.5rem; border: 1px dashed #6b7280; border-radius: 4px; user-select: all; }
+  form.inline { display: inline-flex; align-items: center; gap: 0.5rem; margin: 0; }
+  form.inline label { font-weight: normal; }
+  form.inline input[type="checkbox"] { display: inline; width: auto; margin: 0; }
 </style>
 </head>
 <body>
@@ -41,7 +45,6 @@
   <div class="brand">telegram_server</div>
   <a href="/" class="{{if eq .Active "dashboard"}}active{{end}}">Dashboard</a>
   <a href="/apps" class="{{if eq .Active "apps"}}active{{end}}">Apps</a>
-  <a class="disabled">Keys</a>
   <a href="/users" class="{{if eq .Active "users"}}active{{end}}">Users</a>
   <a class="disabled">Audit</a>
   <form class="logout" method="post" action="/logout">

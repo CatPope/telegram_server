@@ -1,6 +1,7 @@
 package adminui
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -24,7 +25,7 @@ func TestDashboardRedirectsWithoutSession(t *testing.T) {
 	}))
 	defer target.Close()
 
-	handler, err := NewServer(testConfig(t, target.URL), nil)
+	handler, err := NewServer(testConfig(t, target.URL), nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -47,7 +48,7 @@ func TestLoginPageRendersCSRFCookieAndForm(t *testing.T) {
 	}))
 	defer target.Close()
 
-	handler, err := NewServer(testConfig(t, target.URL), nil)
+	handler, err := NewServer(testConfig(t, target.URL), nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -80,7 +81,7 @@ func TestLoginFlowSuccessThenDashboardThenLogout(t *testing.T) {
 	defer target.Close()
 
 	cfg := testConfig(t, target.URL)
-	handler, err := NewServer(cfg, nil)
+	handler, err := NewServer(cfg, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -134,6 +135,19 @@ func TestLoginFlowSuccessThenDashboardThenLogout(t *testing.T) {
 	if logoutRec.Code != http.StatusSeeOther {
 		t.Fatalf("expected logout redirect, got %d", logoutRec.Code)
 	}
+
+	// The pre-logout session cookie must be dead server-side, not just
+	// cleared in the browser — replaying it should bounce to /login.
+	replayReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	for _, c := range sessionCookies {
+		replayReq.AddCookie(c)
+	}
+	replayRec := httptest.NewRecorder()
+	handler.ServeHTTP(replayRec, replayReq)
+	if replayRec.Code != http.StatusSeeOther || replayRec.Header().Get("Location") != "/login" {
+		t.Errorf("expected replayed cookie to be rejected after logout, got %d %q",
+			replayRec.Code, replayRec.Header().Get("Location"))
+	}
 }
 
 func TestLoginFailureWrongPassword(t *testing.T) {
@@ -143,7 +157,7 @@ func TestLoginFailureWrongPassword(t *testing.T) {
 	defer target.Close()
 
 	cfg := testConfig(t, target.URL)
-	handler, err := NewServer(cfg, nil)
+	handler, err := NewServer(cfg, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -178,7 +192,7 @@ func TestLoginRateLimited(t *testing.T) {
 	defer target.Close()
 
 	cfg := testConfig(t, target.URL)
-	handler, err := NewServer(cfg, nil)
+	handler, err := NewServer(cfg, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -209,6 +223,50 @@ func TestLoginRateLimited(t *testing.T) {
 	}
 	if code := attempt(); code != http.StatusTooManyRequests {
 		t.Errorf("expected 429 once the rate limit is exceeded, got %d", code)
+	}
+}
+
+func TestLoginGlobalBackoffAcrossIPs(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+
+	cfg := testConfig(t, target.URL)
+	handler, err := NewServer(cfg, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	loginPageReq := httptest.NewRequest(http.MethodGet, "/login", nil)
+	loginPageRec := httptest.NewRecorder()
+	handler.ServeHTTP(loginPageRec, loginPageReq)
+	csrfCookies := loginPageRec.Result().Cookies()
+	token := extractCSRFToken(t, loginPageRec.Body.String())
+
+	attempt := func(ip string) int {
+		form := url.Values{"csrf_token": {token}, "password": {"wrong-password"}}
+		req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.RemoteAddr = ip + ":1234"
+		for _, c := range csrfCookies {
+			req.AddCookie(c)
+		}
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	// Spread failures over distinct IPs so the per-IP bucket never trips —
+	// only the global counter sees them all.
+	for i := 0; i < globalBackoffThreshold; i++ {
+		ip := fmt.Sprintf("10.0.%d.%d", i/250, i%250+1)
+		if code := attempt(ip); code != http.StatusSeeOther {
+			t.Fatalf("attempt %d: expected redirect, got %d", i+1, code)
+		}
+	}
+	if code := attempt("172.16.0.1"); code != http.StatusTooManyRequests {
+		t.Errorf("expected 429 from a fresh IP once the global threshold is hit, got %d", code)
 	}
 }
 

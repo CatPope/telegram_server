@@ -7,22 +7,26 @@ import (
 
 	"github.com/CatPope/telegram_server/internal/adminui/apiclient"
 	"github.com/CatPope/telegram_server/internal/api/middleware"
+	"github.com/CatPope/telegram_server/internal/audit"
 )
 
 type Server struct {
 	cfg      Config
 	sessions *SessionManager
 	limiter  *loginLimiter
+	backoff  *globalBackoff
 	client   *apiclient.Client
 	store    Store
+	keys     KeyStore
+	audit    audit.Writer
 }
 
 // NewServer wires the admin UI's chi router. It reuses telegram_server's
 // own RequestID/Recover/AccessLog middleware so admin UI requests log in
-// the same shape as the main API. store may be nil (DATABASE_URL unset) —
-// the apps pages degrade to a "DB not connected" notice rather than
-// failing to start.
-func NewServer(cfg Config, store Store) (http.Handler, error) {
+// the same shape as the main API. store, keys and auditW may be nil
+// (DATABASE_URL unset) — the apps/keys pages degrade to a "DB not
+// connected" notice rather than failing to start.
+func NewServer(cfg Config, store Store, keys KeyStore, auditW audit.Writer) (http.Handler, error) {
 	sm, err := NewSessionManager(cfg.CookieSecure)
 	if err != nil {
 		return nil, err
@@ -32,8 +36,11 @@ func NewServer(cfg Config, store Store) (http.Handler, error) {
 		cfg:      cfg,
 		sessions: sm,
 		limiter:  newLoginLimiter(),
+		backoff:  newGlobalBackoff(),
 		client:   apiclient.New(cfg.TelegramServerURL, cfg.APIKey),
 		store:    store,
+		keys:     keys,
+		audit:    auditW,
 	}
 
 	r := chi.NewRouter()
@@ -56,6 +63,10 @@ func NewServer(cfg Config, store Store) (http.Handler, error) {
 		r.Get("/apps/{id}", s.handleAppDetail)
 		r.With(RequireCSRF(sm)).Post("/apps/{id}/patch", s.handleAppPatch)
 		r.With(RequireCSRF(sm)).Post("/apps/{id}/deactivate", s.handleAppDeactivate)
+
+		r.Get("/apps/{id}/keys", s.handleKeysList)
+		r.With(RequireCSRF(sm)).Post("/apps/{id}/keys", s.handleKeyIssue)
+		r.With(RequireCSRF(sm)).Post("/apps/{id}/keys/{prefix}/revoke", s.handleKeyRevoke)
 
 		r.Get("/users", s.handleUsersPage)
 		r.With(RequireCSRF(sm)).Post("/users/{id}/grade", s.handleUserGrade)

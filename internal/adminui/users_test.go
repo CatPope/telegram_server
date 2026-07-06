@@ -19,7 +19,7 @@ func TestUserGradeSuccess(t *testing.T) {
 	defer target.Close()
 
 	cfg := testConfig(t, target.URL)
-	handler, err := NewServer(cfg, nil)
+	handler, err := NewServer(cfg, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestUserGradeErrorMapsToFriendlyMessage(t *testing.T) {
 	defer target.Close()
 
 	cfg := testConfig(t, target.URL)
-	handler, err := NewServer(cfg, nil)
+	handler, err := NewServer(cfg, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestUserGradeWithoutCSRFIsForbidden(t *testing.T) {
 	defer target.Close()
 
 	cfg := testConfig(t, target.URL)
-	handler, err := NewServer(cfg, nil)
+	handler, err := NewServer(cfg, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestUserGradeRejectsMalformedTelegramIDPath(t *testing.T) {
 	defer target.Close()
 
 	cfg := testConfig(t, target.URL)
-	handler, err := NewServer(cfg, nil)
+	handler, err := NewServer(cfg, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestUsersPageRendersUnsubscribeConfirmationAfterTwoStepLookup(t *testing.T)
 	defer target.Close()
 
 	cfg := testConfig(t, target.URL)
-	handler, err := NewServer(cfg, nil)
+	handler, err := NewServer(cfg, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestUsersPageRejectsMalformedAppIDInLookup(t *testing.T) {
 	defer target.Close()
 
 	cfg := testConfig(t, target.URL)
-	handler, err := NewServer(cfg, nil)
+	handler, err := NewServer(cfg, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestUserSubscribeAndUnsubscribe(t *testing.T) {
 	defer target.Close()
 
 	cfg := testConfig(t, target.URL)
-	handler, err := NewServer(cfg, nil)
+	handler, err := NewServer(cfg, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}

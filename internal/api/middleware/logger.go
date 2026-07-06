@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"regexp"
@@ -24,6 +25,21 @@ func newDefaultLogWriter() *logWriter {
 }
 
 var defaultLogger = newDefaultLogWriter()
+
+// SetLogOutput redirects structured log output to w and returns a restore
+// function. Intended for tests that assert on what does — or must not —
+// get logged (e.g. adminui's plaintext-key-never-logged check).
+func SetLogOutput(w io.Writer) (restore func()) {
+	defaultLogger.mu.Lock()
+	prev := defaultLogger.out
+	defaultLogger.out = json.NewEncoder(w)
+	defaultLogger.mu.Unlock()
+	return func() {
+		defaultLogger.mu.Lock()
+		defaultLogger.out = prev
+		defaultLogger.mu.Unlock()
+	}
+}
 
 func (lw *logWriter) emit(fields map[string]any) {
 	for k := range fields {

@@ -3,6 +3,7 @@ package adminui
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 )
@@ -59,6 +60,21 @@ func Load() (Config, error) {
 }
 
 var errMissingRequired = errors.New("adminui/config: missing required env var")
+
+// ListensLoopbackOnly reports whether ListenAddr binds a loopback
+// interface. Used at startup to warn when plain-http cookies would travel
+// a non-loopback network (CookieSecure off + public bind).
+func (c Config) ListensLoopbackOnly() bool {
+	host, _, err := net.SplitHostPort(c.ListenAddr)
+	if err != nil {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
 
 func (c Config) validate() error {
 	if c.Password == "" {
