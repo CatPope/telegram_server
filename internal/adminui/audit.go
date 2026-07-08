@@ -3,6 +3,7 @@ package adminui
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/CatPope/telegram_server/internal/adminui/apiclient"
 )
@@ -43,12 +44,40 @@ type AuditFilters struct {
 type AuditDisplayRow struct {
 	At              string
 	Stage           string
+	StageBadge      string
 	AppID           string
 	Endpoint        string
 	DeliveryChannel string
 	Recipient       string
 	ErrorCode       string
 	TraceID         string
+}
+
+// stageBadge maps a stage to its table badge color family (slide 13):
+// red for revocations/denials, green for issued/delivered, blue for app
+// lifecycle, gray otherwise.
+func stageBadge(stage string) string {
+	switch stage {
+	case "key_revoked", "denied", "intrusion_kick", "intrusion_unmitigated", "telegram_auth_failed", "bot_not_admin":
+		return "badge-red"
+	case "key_issued", "delivered", "validated":
+		return "badge-green"
+	case "received", "dispatched":
+		return "badge-blue"
+	case "retried", "deferred":
+		return "badge-purple"
+	default:
+		return "badge-gray"
+	}
+}
+
+// auditTimeLabel condenses the RFC3339 timestamp for the table ("07-06
+// 22:58"); unparseable values pass through untouched.
+func auditTimeLabel(at string) string {
+	if t, err := time.Parse(time.RFC3339, at); err == nil {
+		return t.Format("01-02 15:04")
+	}
+	return at
 }
 
 // handleAuditPage renders the audit log viewer. The page is a read-only
@@ -67,7 +96,8 @@ func (s *Server) handleAuditPage(w http.ResponseWriter, r *http.Request) {
 		Stage:   q.Get("stage"),
 	}
 
-	data := s.basePageData(r, "Audit", "audit")
+	data := s.basePageData(r, "로그", "audit")
+	data.Subtitle = "/admin/audit/search"
 	data.AuditFilters = filters
 	data.AuditStages = auditStages
 
@@ -88,8 +118,9 @@ func (s *Server) handleAuditPage(w http.ResponseWriter, r *http.Request) {
 	data.AuditRows = make([]AuditDisplayRow, 0, len(rows))
 	for _, row := range rows {
 		data.AuditRows = append(data.AuditRows, AuditDisplayRow{
-			At:              row.At,
+			At:              auditTimeLabel(row.At),
 			Stage:           row.Stage,
+			StageBadge:      stageBadge(row.Stage),
 			AppID:           strOrEmpty(row.AppID),
 			Endpoint:        strOrEmpty(row.Endpoint),
 			DeliveryChannel: strOrEmpty(row.DeliveryChannel),

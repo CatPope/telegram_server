@@ -1,8 +1,8 @@
 package adminui
 
 import (
-	"context"
 	"crypto/subtle"
+	"fmt"
 	"net"
 	"net/http"
 	"time"
@@ -12,17 +12,21 @@ import (
 )
 
 // pageData is the template data shared by every page. Fields not
-// applicable to a given page (e.g. Health on the login page) are left
+// applicable to a given page (e.g. Stats on the login page) are left
 // zero-valued.
 type pageData struct {
 	Title         string
+	Subtitle      string
 	Active        string
 	Authenticated bool
 	CSRFToken     string
 	Error         string
 	Success       string
-	Health        string
 	ServerURL     string
+
+	// SessionRemaining is the static "세션 만료까지 ..." hint in the sidebar
+	// footer — rendered once per page load (the CSP allows no JS ticking).
+	SessionRemaining string
 
 	// Apps/Users pages (Phase A2).
 	Apps                  []App
@@ -33,10 +37,26 @@ type pageData struct {
 	TelegramID            string
 	UnsubAppID            string
 
-	// Keys pages (Phase A3). PlaintextKey is rendered exactly once on
-	// key_issued.html and exists nowhere else.
+	// Dashboard (UXUI redesign).
+	Stats        *DashboardStats
+	LineChart    *LineChart
+	BarChart     *BarChart
+	HealthOK     bool
+	HealthDB     string
+	AdminUptime  string
+	StatusFilter string
+
+	// Keys pages (Phase A3 / UXUI redesign). PlaintextKey is rendered
+	// exactly once on key_issued.html and exists nowhere else.
 	Keys         []KeyRow
+	KeyGroups    []KeyGroup
+	KeysView     KeysView
 	PlaintextKey string
+	IssuedPrefix string
+	IssuedLabel  string
+
+	// Users page (UXUI redesign).
+	UsersView UsersView
 
 	// Audit page (Phase A4).
 	AuditFilters AuditFilters
@@ -44,7 +64,76 @@ type pageData struct {
 	AuditRows    []AuditDisplayRow
 }
 
-const healthCheckTimeout = 5 * time.Second
+// KeyGroup is the group-by-app view of the global keys table.
+type KeyGroup struct {
+	AppID string
+	Keys  []KeyRow
+}
+
+// KeysView carries the /keys page's filter state so the toolbar can echo
+// it back and build links that preserve it.
+type KeysView struct {
+	Group   string // "key" | "app"
+	Status  string // "active" | "revoked" | "all"
+	App     string // "" = all apps
+	ShowNew bool
+	// Form* echo the operator's issue-panel input back after a failed
+	// POST /keys so the panel reopens with what they typed.
+	FormAppID  string
+	FormPrefix string
+	FormLabel  string
+}
+
+// UsersView carries the users page state: filters plus the row expanded
+// for inline editing (?selected=).
+type UsersView struct {
+	Grade    string
+	App      string
+	Query    string
+	Users    []UserDisplay
+	Count    int
+	Selected *UserDisplay
+}
+
+// UserDisplay is a UserRow annotated with display strings the template
+// would otherwise have to compute.
+type UserDisplay struct {
+	TelegramID    int64
+	Username      string
+	Grade         string
+	GradeLabel    string
+	GradeBadge    string
+	Subscriptions []string
+}
+
+// gradeLabels maps DB grade values to the UI's Korean labels. The schema
+// allows exactly these three grades (users.grade CHECK constraint).
+var gradeLabels = map[string]string{
+	"user":      "일반 사용자",
+	"developer": "개발자",
+	"admin":     "관리자",
+}
+
+// gradeBadges maps grades to badge color classes.
+var gradeBadges = map[string]string{
+	"user":      "badge-blue",
+	"developer": "badge-teal",
+	"admin":     "badge-purple",
+}
+
+func gradeLabel(g string) string {
+	if l, ok := gradeLabels[g]; ok {
+		return l
+	}
+	return g
+}
+
+func gradeBadge(g string) string {
+	if b, ok := gradeBadges[g]; ok {
+		return b
+	}
+	return "badge-gray"
+}
 
 func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 	tmpl, err := templates.ParsePage("login.html")
@@ -57,9 +146,9 @@ func (s *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
 	}
-	data := pageData{Title: "Login", CSRFToken: token}
+	data := pageData{Title: "운영자 로그인", CSRFToken: token}
 	if r.URL.Query().Get("error") != "" {
-		data.Error = "Invalid password"
+		data.Error = "비밀번호가 올바르지 않습니다"
 	}
 	_ = tmpl.ExecuteTemplate(w, "base", data)
 }
@@ -100,30 +189,47 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
-func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
-	tmpl, err := templates.ParsePage("dashboard.html")
+// render executes a page template, logging (rather than panicking) on
+// failure — matches the existing pattern of ignoring the ExecuteTemplate
+// error after headers may already be partially written.
+func (s *Server) render(w http.ResponseWriter, page string, data pageData) {
+	tmpl, err := templates.ParsePage(page)
 	if err != nil {
 		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
 		return
 	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), healthCheckTimeout)
-	defer cancel()
-	status := "UNREACHABLE"
-	if healthy, err := s.client.Health(ctx); err == nil && healthy {
-		status = "OK"
-	}
-
-	nonce := SessionNonce(r.Context())
-	data := pageData{
-		Title:         "Dashboard",
-		Active:        "dashboard",
-		Authenticated: true,
-		CSRFToken:     s.sessions.CSRFToken(nonce),
-		Health:        status,
-		ServerURL:     s.cfg.TelegramServerURL,
-	}
 	_ = tmpl.ExecuteTemplate(w, "base", data)
+}
+
+// basePageData builds the pageData common to every authenticated page.
+func (s *Server) basePageData(r *http.Request, title, active string) pageData {
+	return pageData{
+		Title:            title,
+		Active:           active,
+		Authenticated:    true,
+		CSRFToken:        s.sessions.CSRFToken(SessionNonce(r.Context())),
+		SessionRemaining: sessionRemaining(SessionExpiry(r.Context())),
+	}
+}
+
+// sessionRemaining formats the time left on the session cookie for the
+// sidebar footer ("11h 59m" / "29m 41s").
+func sessionRemaining(expiry time.Time) string {
+	if expiry.IsZero() {
+		return ""
+	}
+	d := time.Until(expiry)
+	if d <= 0 {
+		return "0s"
+	}
+	d = d.Round(time.Second)
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	sec := int(d.Seconds()) % 60
+	if h > 0 {
+		return fmt.Sprintf("%dh %dm", h, m)
+	}
+	return fmt.Sprintf("%dm %ds", m, sec)
 }
 
 func clientIP(r *http.Request) string {

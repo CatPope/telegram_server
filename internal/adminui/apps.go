@@ -9,7 +9,6 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/CatPope/telegram_server/internal/adminui/apiclient"
-	"github.com/CatPope/telegram_server/internal/adminui/templates"
 )
 
 // grantableCapabilities are the capabilities an operator may grant via
@@ -81,7 +80,12 @@ func friendlyAPIError(err error) string {
 }
 
 func (s *Server) handleAppsList(w http.ResponseWriter, r *http.Request) {
-	data := s.basePageData(r, "Apps", "apps")
+	data := s.basePageData(r, "앱 관리", "apps")
+	data.Subtitle = "/admin/apps"
+	data.StatusFilter = r.URL.Query().Get("status")
+	if data.StatusFilter != "active" && data.StatusFilter != "inactive" {
+		data.StatusFilter = "all"
+	}
 
 	if s.store == nil {
 		data.DBUnavailable = true
@@ -95,12 +99,29 @@ func (s *Server) handleAppsList(w http.ResponseWriter, r *http.Request) {
 		s.render(w, "apps_list.html", data)
 		return
 	}
+	switch data.StatusFilter {
+	case "active":
+		apps = filterApps(apps, true)
+	case "inactive":
+		apps = filterApps(apps, false)
+	}
 	data.Apps = apps
 	s.render(w, "apps_list.html", data)
 }
 
+func filterApps(apps []App, active bool) []App {
+	var out []App
+	for _, a := range apps {
+		if a.Active == active {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
 func (s *Server) handleAppNewForm(w http.ResponseWriter, r *http.Request) {
-	data := s.basePageData(r, "New App", "apps")
+	data := s.basePageData(r, "앱 관리", "apps")
+	data.Subtitle = "새 앱 등록"
 	data.GrantableCapabilities = grantableCapabilities
 	s.render(w, "app_new.html", data)
 }
@@ -115,7 +136,8 @@ func (s *Server) handleAppCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.client.CreateApp(r.Context(), req); err != nil {
-		data := s.basePageData(r, "New App", "apps")
+		data := s.basePageData(r, "앱 관리", "apps")
+		data.Subtitle = "새 앱 등록"
 		data.GrantableCapabilities = grantableCapabilities
 		data.Error = friendlyAPIError(err)
 		s.render(w, "app_new.html", data)
@@ -126,7 +148,8 @@ func (s *Server) handleAppCreate(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAppDetail(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	data := s.basePageData(r, "App: "+id, "apps")
+	data := s.basePageData(r, "앱 관리", "apps")
+	data.Subtitle = id
 	data.AppID = id
 	data.GrantableCapabilities = grantableCapabilities
 
@@ -156,18 +179,56 @@ func (s *Server) handleAppDetail(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "app_detail.html", data)
 }
 
+// handleAppPatch saves the app-detail form. The form submits the desired
+// capability *state* (one checkbox list, slide 10) — the diff against the
+// app's current grants becomes the API's add/remove lists. The tiny
+// "앱 다시 활성화" form posts only set_active=1.
 func (s *Server) handleAppPatch(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	description := r.FormValue("description")
-	minGrade := r.FormValue("min_grade")
-	active := r.FormValue("active") == "on"
+	if err := r.ParseForm(); err != nil {
+		s.renderAppDetailError(w, r, id, "요청 형식이 올바르지 않습니다")
+		return
+	}
 
-	req := apiclient.PatchAppRequest{
-		Description:        &description,
-		MinGrade:           &minGrade,
-		Active:             &active,
-		AddCapabilities:    filterGrantable(r.Form["add_capabilities"]),
-		RemoveCapabilities: filterGrantable(r.Form["remove_capabilities"]),
+	req := apiclient.PatchAppRequest{}
+	if r.Form.Has("description") {
+		d := r.FormValue("description")
+		req.Description = &d
+	}
+	if r.Form.Has("min_grade") {
+		g := r.FormValue("min_grade")
+		req.MinGrade = &g
+	}
+	if v := r.FormValue("set_active"); v != "" {
+		b := v == "1"
+		req.Active = &b
+	}
+
+	if r.Form.Has("capabilities") || r.Form.Has("min_grade") {
+		// Capability checkboxes are only present on the full form (an
+		// unchecked-all state still carries min_grade), so compute the diff
+		// there; the set_active mini-form must not touch capabilities.
+		if s.store == nil {
+			s.renderAppDetailError(w, r, id, "capability 변경은 DB 연결이 필요합니다")
+			return
+		}
+		app, err := s.store.GetApp(r.Context(), id)
+		if err != nil {
+			s.renderAppDetailError(w, r, id, "앱 정보를 불러오지 못했습니다")
+			return
+		}
+		desired := filterGrantable(r.Form["capabilities"])
+		current := filterGrantable(app.Capabilities)
+		for _, c := range desired {
+			if !slices.Contains(current, c) {
+				req.AddCapabilities = append(req.AddCapabilities, c)
+			}
+		}
+		for _, c := range current {
+			if !slices.Contains(desired, c) {
+				req.RemoveCapabilities = append(req.RemoveCapabilities, c)
+			}
+		}
 	}
 
 	if err := s.client.PatchApp(r.Context(), id, req); err != nil {
@@ -190,7 +251,8 @@ func (s *Server) handleAppDeactivate(w http.ResponseWriter, r *http.Request) {
 // re-renders app_detail.html with an error banner, so a failed patch/
 // deactivate doesn't lose the operator's place.
 func (s *Server) renderAppDetailError(w http.ResponseWriter, r *http.Request, id, message string) {
-	data := s.basePageData(r, "App: "+id, "apps")
+	data := s.basePageData(r, "앱 관리", "apps")
+	data.Subtitle = id
 	data.AppID = id
 	data.GrantableCapabilities = grantableCapabilities
 	data.Error = message
@@ -202,26 +264,4 @@ func (s *Server) renderAppDetailError(w http.ResponseWriter, r *http.Request, id
 		data.DBUnavailable = true
 	}
 	s.render(w, "app_detail.html", data)
-}
-
-// render executes a page template, logging (rather than panicking) on
-// failure — matches the existing handlers.go pattern of ignoring the
-// ExecuteTemplate error after headers may already be partially written.
-func (s *Server) render(w http.ResponseWriter, page string, data pageData) {
-	tmpl, err := templates.ParsePage(page)
-	if err != nil {
-		http.Error(w, `{"error":"internal_error"}`, http.StatusInternalServerError)
-		return
-	}
-	_ = tmpl.ExecuteTemplate(w, "base", data)
-}
-
-// basePageData builds the pageData common to every authenticated page.
-func (s *Server) basePageData(r *http.Request, title, active string) pageData {
-	return pageData{
-		Title:         title,
-		Active:        active,
-		Authenticated: true,
-		CSRFToken:     s.sessions.CSRFToken(SessionNonce(r.Context())),
-	}
 }

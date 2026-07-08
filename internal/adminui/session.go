@@ -112,20 +112,29 @@ func (sm *SessionManager) Middleware(next http.Handler) http.Handler {
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
-		nonce, ok := sm.verify(cookie.Value)
+		nonce, expiry, ok := sm.verify(cookie.Value)
 		if !ok {
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
 		ctx := context.WithValue(r.Context(), sessionNonceCtxKey{}, nonce)
+		ctx = context.WithValue(ctx, sessionExpiryCtxKey{}, expiry)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
 type sessionNonceCtxKey struct{}
+type sessionExpiryCtxKey struct{}
 
 func SessionNonce(ctx context.Context) string {
 	v, _ := ctx.Value(sessionNonceCtxKey{}).(string)
+	return v
+}
+
+// SessionExpiry returns the session cookie's expiry so pages can render a
+// static "time remaining" hint (no JS ticking under the CSP).
+func SessionExpiry(ctx context.Context) time.Time {
+	v, _ := ctx.Value(sessionExpiryCtxKey{}).(time.Time)
 	return v
 }
 
@@ -136,29 +145,29 @@ func (sm *SessionManager) sign(expiry int64, nonce string) string {
 	return payload + "|" + hex.EncodeToString(mac.Sum(nil))
 }
 
-func (sm *SessionManager) verify(value string) (nonce string, ok bool) {
+func (sm *SessionManager) verify(value string) (nonce string, expiry time.Time, ok bool) {
 	parts := strings.SplitN(value, "|", 3)
 	if len(parts) != 3 {
-		return "", false
+		return "", time.Time{}, false
 	}
 	expiryStr, nonce, sig := parts[0], parts[1], parts[2]
-	expiry, err := strconv.ParseInt(expiryStr, 10, 64)
+	expiryUnix, err := strconv.ParseInt(expiryStr, 10, 64)
 	if err != nil {
-		return "", false
+		return "", time.Time{}, false
 	}
 	mac := hmac.New(sha256.New, sm.secret)
 	mac.Write([]byte(expiryStr + "|" + nonce))
 	expected := hex.EncodeToString(mac.Sum(nil))
 	if !hmac.Equal([]byte(sig), []byte(expected)) {
-		return "", false
+		return "", time.Time{}, false
 	}
-	if time.Now().Unix() > expiry {
-		return "", false
+	if time.Now().Unix() > expiryUnix {
+		return "", time.Time{}, false
 	}
 	if sm.isRevoked(nonce) {
-		return "", false
+		return "", time.Time{}, false
 	}
-	return nonce, true
+	return nonce, time.Unix(expiryUnix, 0), true
 }
 
 func randomHex(n int) (string, error) {

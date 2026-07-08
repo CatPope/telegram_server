@@ -64,9 +64,12 @@ func NewServer(cfg Config, store Store, keys KeyStore, auditW audit.Writer) (htt
 		r.With(RequireCSRF(sm)).Post("/apps/{id}/patch", s.handleAppPatch)
 		r.With(RequireCSRF(sm)).Post("/apps/{id}/deactivate", s.handleAppDeactivate)
 
-		r.Get("/apps/{id}/keys", s.handleKeysList)
-		r.With(RequireCSRF(sm)).Post("/apps/{id}/keys", s.handleKeyIssue)
-		r.With(RequireCSRF(sm)).Post("/apps/{id}/keys/{prefix}/revoke", s.handleKeyRevoke)
+		r.Get("/keys", s.handleKeysPage)
+		r.With(RequireCSRF(sm)).Post("/keys", s.handleKeyIssue)
+		r.With(RequireCSRF(sm)).Post("/keys/{app}/{prefix}/revoke", s.handleKeyRevoke)
+		r.With(RequireCSRF(sm)).Post("/keys/{app}/{prefix}/label", s.handleKeyLabel)
+		// Pre-redesign URL, kept alive for bookmarks/app-detail links.
+		r.Get("/apps/{id}/keys", s.handleKeysLegacyRedirect)
 
 		r.Get("/audit", s.handleAuditPage)
 

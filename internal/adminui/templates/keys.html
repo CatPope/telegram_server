@@ -1,46 +1,153 @@
 {{define "content"}}
-<h1>Keys: {{.AppID}}</h1>
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
-{{if .Success}}<p class="success">{{.Success}}</p>{{end}}
-
 {{if .DBUnavailable}}
-<p>키 관리는 DB 연결이 필요합니다. <code>DATABASE_URL</code> 설정 후 다시 시도하세요.</p>
+<div class="banner banner-warn">키 관리는 DB 연결이 필요합니다. <code>DATABASE_URL</code> 설정 후 다시 시도하세요.</div>
 {{else}}
+{{$v := .KeysView}}
+<div class="toolbar">
+  <span class="tlabel">그룹화 기준</span>
+  <span class="seg">
+    <a href="/keys?group=key&status={{$v.Status}}{{if $v.App}}&app={{$v.App}}{{end}}" class="{{if eq $v.Group "key"}}on{{end}}">API 키</a>
+    <a href="/keys?group=app&status={{$v.Status}}{{if $v.App}}&app={{$v.App}}{{end}}" class="{{if eq $v.Group "app"}}on{{end}}">앱</a>
+  </span>
+  <span class="tlabel">상태</span>
+  <span class="seg">
+    <a href="/keys?group={{$v.Group}}&status=active{{if $v.App}}&app={{$v.App}}{{end}}" class="{{if eq $v.Status "active"}}on{{end}}">활성</a>
+    <a href="/keys?group={{$v.Group}}&status=revoked{{if $v.App}}&app={{$v.App}}{{end}}" class="{{if eq $v.Status "revoked"}}on{{end}}">폐기됨</a>
+    <a href="/keys?group={{$v.Group}}&status=all{{if $v.App}}&app={{$v.App}}{{end}}" class="{{if eq $v.Status "all"}}on{{end}}">전체</a>
+  </span>
+  <span class="spacer"></span>
+  <form method="get" action="/keys" style="display:flex;align-items:center;gap:8px;margin:0">
+    <input type="hidden" name="group" value="{{$v.Group}}">
+    <input type="hidden" name="status" value="{{$v.Status}}">
+    <span class="tlabel">앱 필터</span>
+    <select name="app" style="width:auto;min-width:150px">
+      <option value="">모든 앱</option>
+      {{range .Apps}}<option value="{{.ID}}" {{if eq .ID $v.App}}selected{{end}}>{{.ID}}</option>{{end}}
+    </select>
+    <button type="submit" class="btn btn-outline" style="padding:8px 12px">적용</button>
+  </form>
+  <a class="btn btn-primary" href="/keys?group={{$v.Group}}&status={{$v.Status}}{{if $v.App}}&app={{$v.App}}{{end}}&new=1">🔑 API 키 만들기</a>
+</div>
+
+{{if $v.ShowNew}}
+<div class="card" style="border-color:#bfdbfe">
+  <h2>새 키 발급</h2>
+  <p class="caption">평문은 발급 직후 1회만 표시됩니다 · secret 192-bit · 저장은 Argon2id 해시</p>
+  <form method="post" action="/keys" style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+    <div style="min-width:180px">
+      <label class="field" for="app_id">앱 (프로젝트)</label>
+      <select id="app_id" name="app_id" required>
+        {{range .Apps}}{{if .Active}}<option value="{{.ID}}" {{if eq .ID (or $v.FormAppID $v.App)}}selected{{end}}>{{.ID}}</option>{{end}}{{end}}
+      </select>
+    </div>
+    <div style="min-width:160px">
+      <label class="field" for="prefix">prefix</label>
+      <input type="text" id="prefix" name="prefix" class="mono" required pattern="[a-z0-9]{4,16}" value="{{$v.FormPrefix}}">
+    </div>
+    <div style="flex:1;min-width:200px">
+      <label class="field" for="label">label</label>
+      <input type="text" id="label" name="label" value="{{$v.FormLabel}}">
+    </div>
+    <button type="submit" class="btn btn-primary">발급</button>
+  </form>
+  <p class="field-hint">prefix 규칙: ^[a-z0-9]{4,16}$</p>
+</div>
+{{end}}
+
+{{if eq $v.Group "app"}}
+{{range .KeyGroups}}
+<div class="card table-card">
 <table>
-  <thead><tr><th>Prefix</th><th>Label</th><th>발급일</th><th>상태</th><th>폐기</th></tr></thead>
+  <thead><tr><th><a class="applink" href="/apps/{{.AppID}}">{{.AppID}}</a></th><th>생성일</th><th></th></tr></thead>
   <tbody>
   {{range .Keys}}
   <tr>
-    <td><code>{{.Prefix}}</code></td>
-    <td>{{.Label}}</td>
-    <td>{{.CreatedAt.Format "2006-01-02 15:04"}}</td>
-    <td>{{if .RevokedAt}}<span class="status-bad">revoked</span>{{else}}<span class="status-ok">active</span>{{end}}</td>
     <td>
+      <span class="mono" style="font-weight:600">…{{.Prefix}}</span>
+      {{if .RevokedAt}}<span class="badge badge-gray">폐기됨</span>{{else}}<span class="badge badge-green">활성</span>{{end}}
+      {{if .Label}}<div class="cell-sub">{{.Label}}</div>{{end}}
+    </td>
+    <td style="color:#4b5563">{{.CreatedAt.Format "2006-01-02"}}</td>
+    <td style="text-align:right;white-space:nowrap">
       {{if not .RevokedAt}}
-      <form method="post" action="/apps/{{$.AppID}}/keys/{{.Prefix}}/revoke" class="inline">
-        <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
-        <label><input type="checkbox" name="confirm" value="1" required> 확인</label>
-        <button type="submit">폐기</button>
-      </form>
+      <a class="rowlink" href="#edit-{{.Prefix}}">수정</a> ·
+      <a class="rowlink" style="color:#dc2626" href="#revoke-{{.Prefix}}">폐기</a>
+      {{end}}
+    </td>
+  </tr>
+  {{end}}
+  </tbody>
+</table>
+</div>
+{{end}}
+{{if not .KeyGroups}}<div class="card"><p class="caption" style="margin:0">표시할 키가 없습니다</p></div>{{end}}
+{{else}}
+<div class="card table-card">
+<table>
+  <thead><tr><th>키</th><th>앱 (프로젝트)</th><th>생성일</th><th></th></tr></thead>
+  <tbody>
+  {{range .Keys}}
+  <tr>
+    <td>
+      <span class="mono" style="font-weight:600">…{{.Prefix}}</span>
+      {{if .RevokedAt}}<span class="badge badge-gray">폐기됨</span>{{else}}<span class="badge badge-green">활성</span>{{end}}
+      {{if .Label}}<div class="cell-sub">{{.Label}}</div>{{end}}
+    </td>
+    <td><a class="applink" href="/apps/{{.AppID}}">{{.AppID}}</a></td>
+    <td style="color:#4b5563">{{.CreatedAt.Format "2006-01-02"}}</td>
+    <td style="text-align:right;white-space:nowrap">
+      {{if not .RevokedAt}}
+      <a class="rowlink" href="#edit-{{.Prefix}}">수정</a> ·
+      <a class="rowlink" style="color:#dc2626" href="#revoke-{{.Prefix}}">폐기</a>
       {{end}}
     </td>
   </tr>
   {{else}}
-  <tr><td colspan="5">발급된 키가 없습니다</td></tr>
+  <tr><td colspan="4" style="color:#6b7280">표시할 키가 없습니다</td></tr>
   {{end}}
   </tbody>
 </table>
-
-<h2>새 키 발급</h2>
-<form method="post" action="/apps/{{.AppID}}/keys" class="card">
-  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-  <label for="prefix">Prefix (영소문자/숫자 4~16자)</label>
-  <input type="text" id="prefix" name="prefix" required pattern="[a-z0-9]{4,16}">
-  <label for="label">Label (선택)</label>
-  <input type="text" id="label" name="label">
-  <button type="submit">발급</button>
-</form>
+</div>
 {{end}}
 
-<p class="actions"><a class="button" href="/apps/{{.AppID}}">← 앱 상세</a></p>
+{{range .Keys}}
+{{if not .RevokedAt}}
+<div class="modal" id="edit-{{.Prefix}}">
+  <div class="dialog">
+    <a class="close" href="#">✕</a>
+    <h3>API 키 수정</h3>
+    <form method="post" action="/keys/{{.AppID}}/{{.Prefix}}/label">
+      <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+      <label class="field">키 이름 (prefix)</label>
+      <input type="text" class="mono" value="{{.Prefix}}" disabled style="margin-bottom:6px;background:#f9fafb;color:#6b7280">
+      <p class="field-hint" style="margin:0 0 14px">prefix는 발급된 토큰(tg_{{.Prefix}}_…)의 일부라 변경할 수 없습니다</p>
+      <label class="field" for="label-{{.Prefix}}">라벨</label>
+      <input type="text" id="label-{{.Prefix}}" name="label" value="{{.Label}}">
+      <div class="row-actions">
+        <a href="#" class="btn btn-outline">취소</a>
+        <button type="submit" class="btn btn-primary">업데이트 ↵</button>
+      </div>
+    </form>
+  </div>
+</div>
+<div class="modal" id="revoke-{{.Prefix}}">
+  <div class="dialog">
+    <a class="close" href="#">✕</a>
+    <h3 style="color:#dc2626">API 키 폐기</h3>
+    <p style="font-size:14px;margin:0 0 8px"><code>…{{.Prefix}}</code> 키를 폐기하면 <strong>즉시 401</strong>로 무효화되며 되돌릴 수 없습니다.</p>
+    <p class="caption" style="margin:0"><code>audit_log</code>에 <code>key_revoked</code> 이벤트가 기록됩니다.</p>
+    <form method="post" action="/keys/{{.AppID}}/{{.Prefix}}/revoke">
+      <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+      <input type="hidden" name="confirm" value="1">
+      <div class="row-actions">
+        <a href="#" class="btn btn-outline">취소</a>
+        <button type="submit" class="btn btn-danger">폐기 실행</button>
+      </div>
+    </form>
+  </div>
+</div>
+{{end}}
+{{end}}
+{{end}}
 {{end}}

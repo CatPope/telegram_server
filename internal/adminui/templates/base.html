@@ -4,58 +4,232 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{.Title}} — telegram_server Admin</title>
+<title>{{.Title}} — adminui</title>
 <style>
-  :root { color-scheme: light dark; }
   * { box-sizing: border-box; }
-  body { font-family: system-ui, sans-serif; margin: 0; display: flex; min-height: 100vh; }
-  nav { width: 200px; flex-shrink: 0; background: #1f2937; color: #fff; padding: 1.5rem 1rem; }
-  nav .brand { font-weight: 700; margin-bottom: 1.5rem; }
-  nav a { display: block; color: #d1d5db; text-decoration: none; padding: 0.5rem 0; }
-  nav a.active { color: #fff; font-weight: 600; }
-  nav a.disabled { color: #6b7280; pointer-events: none; }
-  main { flex: 1; padding: 2rem; }
-  .card { border: 1px solid #6b7280; border-radius: 8px; padding: 1.25rem; max-width: 480px; }
-  .status-ok { color: #16a34a; font-weight: 600; }
-  .status-bad { color: #dc2626; font-weight: 600; }
-  input { display: block; margin-bottom: 0.75rem; padding: 0.4rem; width: 100%; }
-  button { padding: 0.5rem 1rem; cursor: pointer; }
-  .error { color: #dc2626; margin-bottom: 1rem; }
-  .success { color: #16a34a; margin-bottom: 1rem; }
-  form.logout { margin: 0; }
-  dt { color: #9ca3af; font-size: 0.85rem; }
-  dd { margin: 0 0 1rem; }
-  table { border-collapse: collapse; width: 100%; max-width: 900px; }
-  th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #6b7280; }
-  fieldset { border: 1px solid #6b7280; border-radius: 8px; margin-bottom: 1rem; max-width: 480px; }
-  fieldset label { display: block; font-weight: normal; margin-bottom: 0.25rem; }
-  fieldset label input[type="checkbox"] { display: inline; width: auto; margin-right: 0.4rem; }
-  select, textarea { display: block; margin-bottom: 0.75rem; padding: 0.4rem; width: 100%; }
-  .actions { margin: 1rem 0; }
-  a.button { display: inline-block; padding: 0.5rem 1rem; text-decoration: none; border: 1px solid #6b7280; border-radius: 4px; }
-  code.key-plain { display: block; word-break: break-all; font-size: 1.05rem; padding: 0.5rem; border: 1px dashed #6b7280; border-radius: 4px; user-select: all; }
-  form.inline { display: inline-flex; align-items: center; gap: 0.5rem; margin: 0; }
-  form.inline label { font-weight: normal; }
-  form.inline input[type="checkbox"] { display: inline; width: auto; margin: 0; }
+  body {
+    font-family: "Pretendard", "Noto Sans KR", system-ui, sans-serif;
+    margin: 0; min-height: 100vh; display: flex;
+    background: #f1f3f5; color: #111827;
+  }
+  code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+  /* ── Sidebar ─────────────────────────────────────────── */
+  .sidebar {
+    width: 230px; flex-shrink: 0; display: flex; flex-direction: column;
+    background: #1a2029; color: #e5e7eb; min-height: 100vh;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; padding: 22px 20px 26px; }
+  .brand-badge {
+    width: 30px; height: 30px; border-radius: 8px; background: #2563eb;
+    color: #fff; font-weight: 800; font-size: 15px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .brand-name { font-weight: 800; font-size: 16px; color: #fff; }
+  .nav { flex: 1; padding: 0 12px; }
+  .nav a {
+    display: flex; align-items: center; gap: 10px;
+    color: #9ca3af; text-decoration: none; font-size: 14px;
+    padding: 10px 12px; border-radius: 8px; margin-bottom: 2px;
+  }
+  .nav a .dot { width: 8px; height: 8px; border-radius: 2px; background: #4b5563; flex-shrink: 0; }
+  .nav a.active { background: #2b3342; color: #fff; font-weight: 600; }
+  .nav a.active .dot { background: #3b82f6; }
+  .nav a:hover { color: #fff; }
+  .side-foot { border-top: 1px solid #2b3342; margin: 0 16px; padding: 14px 4px 18px; }
+  .side-foot .session { color: #6b7280; font-size: 12px; margin-bottom: 10px; }
+  .side-foot form { margin: 0; }
+  .side-foot button {
+    background: none; border: none; padding: 0; cursor: pointer;
+    color: #fca5a5; font-size: 13px; font-family: inherit;
+  }
+  .side-foot button:hover { color: #fecaca; }
+
+  /* ── Topbar + content ────────────────────────────────── */
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .topbar {
+    background: #fff; border-bottom: 1px solid #e5e7eb;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 24px; gap: 16px;
+  }
+  .topbar .crumb { display: flex; align-items: baseline; gap: 10px; }
+  .topbar .crumb h1 { font-size: 17px; margin: 0; font-weight: 800; }
+  .topbar .crumb .sub { color: #6b7280; font-size: 13px; }
+  .topbar .meta { color: #6b7280; font-size: 12px; white-space: nowrap; }
+  .topbar .meta .live { color: #16a34a; }
+  .content { padding: 24px; max-width: 1280px; width: 100%; }
+
+  /* ── Cards / tables / badges ─────────────────────────── */
+  .card {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 12px;
+    box-shadow: 0 1px 2px rgba(16, 24, 40, .04); padding: 20px; margin-bottom: 20px;
+  }
+  .card h2 { margin: 0 0 4px; font-size: 16px; }
+  .card .caption { color: #6b7280; font-size: 13px; margin: 0 0 16px; }
+  table { border-collapse: collapse; width: 100%; }
+  th { text-align: left; font-size: 12px; letter-spacing: .04em; color: #6b7280; font-weight: 600; }
+  th, td { padding: 12px 14px; border-bottom: 1px solid #f3f4f6; font-size: 14px; }
+  tbody tr:last-child td { border-bottom: none; }
+  thead tr { background: #f9fafb; }
+  .table-card { padding: 0; overflow: hidden; }
+  .table-card table { margin: 0; }
+  tr.selected td { background: #eff6ff; }
+  .cell-sub { color: #6b7280; font-size: 12.5px; margin-top: 2px; }
+
+  .badge {
+    display: inline-block; padding: 2px 10px; border-radius: 999px;
+    font-size: 12px; font-weight: 600; white-space: nowrap;
+  }
+  .badge-green  { background: #dcfce7; color: #15803d; }
+  .badge-gray   { background: #e5e7eb; color: #4b5563; }
+  .badge-red    { background: #fee2e2; color: #b91c1c; }
+  .badge-blue   { background: #dbeafe; color: #1d4ed8; }
+  .badge-teal   { background: #ccfbf1; color: #0f766e; }
+  .badge-purple { background: #ede9fe; color: #6d28d9; }
+  .badge-mono   { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 500; }
+
+  /* ── Controls ────────────────────────────────────────── */
+  .btn {
+    display: inline-block; border: 1px solid transparent; border-radius: 8px;
+    padding: 9px 18px; font-size: 14px; font-weight: 600; cursor: pointer;
+    text-decoration: none; font-family: inherit; line-height: 1.2;
+  }
+  .btn-primary { background: #2563eb; color: #fff; }
+  .btn-primary:hover { background: #1d4ed8; }
+  .btn-dark { background: #1f2937; color: #fff; }
+  .btn-danger { background: #dc2626; color: #fff; }
+  .btn-outline { background: #fff; border-color: #d1d5db; color: #374151; }
+  .btn-outline-danger { background: #fff; border-color: #fca5a5; color: #dc2626; }
+  .btn-block { display: block; width: 100%; text-align: center; }
+
+  input[type=text], input[type=password], select {
+    padding: 9px 12px; border: 1px solid #d1d5db; border-radius: 8px;
+    font-size: 14px; font-family: inherit; background: #fff; color: inherit;
+    width: 100%;
+  }
+  input:focus, select:focus { outline: 2px solid #bfdbfe; border-color: #2563eb; }
+  label.field { display: block; font-size: 13px; font-weight: 600; margin: 0 0 6px; }
+  .field-hint { color: #9ca3af; font-size: 12px; margin-top: 6px; }
+
+  .toolbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
+  .toolbar .spacer { flex: 1; }
+  .toolbar .tlabel { color: #6b7280; font-size: 13px; }
+  .seg { display: inline-flex; background: #e9ecef; border-radius: 9px; padding: 3px; }
+  .seg a {
+    padding: 6px 14px; border-radius: 7px; font-size: 13px; font-weight: 600;
+    color: #6b7280; text-decoration: none;
+  }
+  .seg a.on { background: #fff; color: #111827; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+
+  .banner { border-radius: 10px; padding: 12px 16px; font-size: 14px; margin-bottom: 18px; }
+  .banner-error { background: #fee2e2; color: #b91c1c; }
+  .banner-success { background: #dcfce7; color: #15803d; }
+  .banner-warn { background: #fef9c3; color: #854d0e; border: 1px solid #fde68a; }
+
+  .checkrow {
+    display: flex; align-items: center; gap: 10px;
+    border: 1px solid #e5e7eb; border-radius: 9px; padding: 12px 14px; margin-bottom: 10px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13.5px;
+  }
+  .checkrow input[type=checkbox] { width: 16px; height: 16px; accent-color: #2563eb; }
+  .lockrow {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    border: 1px dashed #d1d5db; border-radius: 9px; padding: 12px 14px; margin-bottom: 10px;
+    color: #9ca3af; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13.5px;
+    background: #fafafa;
+  }
+  .lockrow .deny { color: #dc2626; font-size: 12px; }
+
+  /* ── Modals (CSS :target — the CSP allows no JS) ─────── */
+  .modal {
+    display: none; position: fixed; inset: 0; z-index: 50;
+    background: rgba(17, 24, 39, .45);
+  }
+  .modal:target { display: block; }
+  .modal .dialog {
+    background: #fff; border-radius: 14px; box-shadow: 0 20px 50px rgba(0,0,0,.25);
+    width: min(480px, calc(100vw - 32px)); margin: 12vh auto 0; padding: 24px;
+  }
+  .modal .dialog h3 { margin: 0 0 14px; font-size: 16px; }
+  .modal .dialog .close { float: right; color: #6b7280; text-decoration: none; font-size: 18px; }
+  .modal .dialog .row-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 20px; }
+  .stat-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 18px 20px; box-shadow: 0 1px 2px rgba(16,24,40,.04); }
+  .stat-card .num { font-size: 30px; font-weight: 800; }
+  .stat-card .lab { color: #6b7280; font-size: 13px; margin-top: 4px; }
+  .chart-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 20px; }
+  @media (max-width: 900px) { .chart-grid { grid-template-columns: 1fr; } }
+  .legend { display: flex; gap: 14px; font-size: 12.5px; color: #374151; font-family: ui-monospace, monospace; }
+  .legend .sw { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+  .kv { width: 100%; border-collapse: collapse; }
+  .kv td { padding: 10px 0; border-bottom: 1px solid #f3f4f6; font-size: 14px; }
+  .kv td:last-child { text-align: right; font-family: ui-monospace, monospace; }
+  a.applink { color: #2563eb; text-decoration: none; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13.5px; }
+  a.applink:hover { text-decoration: underline; }
+  a.rowlink { color: #2563eb; text-decoration: none; font-size: 13.5px; }
+  .key-plain {
+    display: block; background: #111827; color: #e5e7eb; border-radius: 10px;
+    padding: 16px; font-size: 15px; word-break: break-all; user-select: all;
+  }
+  .key-plain .klabel { display: block; color: #9ca3af; font-size: 12px; margin-bottom: 8px; user-select: none; }
+
+  /* ── Users inline editor ─────────────────────────────── */
+  .gradeopts { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }
+  .gradeopts input { position: absolute; opacity: 0; pointer-events: none; }
+  .gradeopts label {
+    padding: 8px 18px; border: 1px solid #d1d5db; border-radius: 8px;
+    font-size: 14px; font-weight: 600; cursor: pointer; color: #374151; background: #fff;
+  }
+  .gradeopts input:checked + label { background: #2563eb; border-color: #2563eb; color: #fff; }
+  .gradeopts input:focus-visible + label { outline: 2px solid #bfdbfe; }
+  .subrow {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    border: 1px solid #e5e7eb; border-radius: 9px; padding: 10px 14px; margin-bottom: 10px;
+  }
+  .subrow form { margin: 0; }
+  .btn-unsub { background: none; border: none; color: #dc2626; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; }
+  .panel-row td { background: #fff; padding: 20px 24px; }
+
+  /* ── Login ───────────────────────────────────────────── */
+  .login-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; }
+  .login-card { width: min(400px, 100%); }
+  .login-foot { color: #9ca3af; font-size: 12.5px; margin-top: 14px; text-align: center; }
 </style>
 </head>
 <body>
 {{if .Authenticated}}
-<nav>
-  <div class="brand">telegram_server</div>
-  <a href="/" class="{{if eq .Active "dashboard"}}active{{end}}">Dashboard</a>
-  <a href="/apps" class="{{if eq .Active "apps"}}active{{end}}">Apps</a>
-  <a href="/users" class="{{if eq .Active "users"}}active{{end}}">Users</a>
-  <a href="/audit" class="{{if eq .Active "audit"}}active{{end}}">Audit</a>
-  <form class="logout" method="post" action="/logout">
-    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-    <button type="submit">Logout</button>
-  </form>
-</nav>
-{{end}}
-<main>
+<aside class="sidebar">
+  <div class="brand"><span class="brand-badge">A</span><span class="brand-name">adminui</span></div>
+  <nav class="nav">
+    <a href="/" class="{{if eq .Active "dashboard"}}active{{end}}"><span class="dot"></span>대시보드</a>
+    <a href="/keys" class="{{if eq .Active "keys"}}active{{end}}"><span class="dot"></span>API 키</a>
+    <a href="/apps" class="{{if eq .Active "apps"}}active{{end}}"><span class="dot"></span>앱</a>
+    <a href="/users" class="{{if eq .Active "users"}}active{{end}}"><span class="dot"></span>사용자</a>
+    <a href="/audit" class="{{if eq .Active "audit"}}active{{end}}"><span class="dot"></span>로그</a>
+  </nav>
+  <div class="side-foot">
+    {{if .SessionRemaining}}<div class="session">세션 만료까지 {{.SessionRemaining}}</div>{{end}}
+    <form method="post" action="/logout">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <button type="submit">→ 로그아웃</button>
+    </form>
+  </div>
+</aside>
+<div class="main">
+  <header class="topbar">
+    <div class="crumb"><h1>{{.Title}}</h1>{{if .Subtitle}}<span class="sub">{{.Subtitle}}</span>{{end}}</div>
+    <div class="meta"><span class="live">●</span> <span class="mono">X-Trace-Id</span> 전파 · <span class="mono">no-store</span></div>
+  </header>
+  <main class="content">
+  {{if .Error}}<div class="banner banner-error">{{.Error}}</div>{{end}}
+  {{if .Success}}<div class="banner banner-success">{{.Success}}</div>{{end}}
+  {{template "content" .}}
+  </main>
+</div>
+{{else}}
 {{template "content" .}}
-</main>
+{{end}}
 </body>
 </html>
 {{end}}

@@ -42,11 +42,22 @@ func TestUserGradeSuccess(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303 redirect, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "등급이 변경되었습니다") {
-		t.Errorf("expected success message, got: %s", rec.Body.String())
+	if loc := rec.Header().Get("Location"); loc != "/users?selected=42&saved=grade" {
+		t.Errorf("Location = %q", loc)
+	}
+
+	// The redirect target shows the success banner.
+	confirmReq := httptest.NewRequest(http.MethodGet, "/users?selected=42&saved=grade", nil)
+	for _, c := range cookies {
+		confirmReq.AddCookie(c)
+	}
+	confirmRec := httptest.NewRecorder()
+	handler.ServeHTTP(confirmRec, confirmReq)
+	if !strings.Contains(confirmRec.Body.String(), "등급이 변경되었습니다") {
+		t.Errorf("expected success message, got: %s", confirmRec.Body.String())
 	}
 }
 
@@ -247,8 +258,8 @@ func TestUserSubscribeAndUnsubscribe(t *testing.T) {
 	}
 	subRec := httptest.NewRecorder()
 	handler.ServeHTTP(subRec, subReq)
-	if subRec.Code != http.StatusOK {
-		t.Fatalf("subscribe: expected 200, got %d: %s", subRec.Code, subRec.Body.String())
+	if subRec.Code != http.StatusSeeOther {
+		t.Fatalf("subscribe: expected 303, got %d: %s", subRec.Code, subRec.Body.String())
 	}
 	if lastMethod != http.MethodPost {
 		t.Errorf("subscribe method = %q", lastMethod)
@@ -262,10 +273,71 @@ func TestUserSubscribeAndUnsubscribe(t *testing.T) {
 	}
 	unsubRec := httptest.NewRecorder()
 	handler.ServeHTTP(unsubRec, unsubReq)
-	if unsubRec.Code != http.StatusOK {
-		t.Fatalf("unsubscribe: expected 200, got %d: %s", unsubRec.Code, unsubRec.Body.String())
+	if unsubRec.Code != http.StatusSeeOther {
+		t.Fatalf("unsubscribe: expected 303, got %d: %s", unsubRec.Code, unsubRec.Body.String())
 	}
 	if lastMethod != http.MethodDelete {
 		t.Errorf("unsubscribe method = %q", lastMethod)
+	}
+}
+
+// TestUsersListRendersFiltersAndInlinePanel exercises the redesigned
+// list page: rows from the store, grade filter, and the ?selected= inline
+// editor with concrete server-rendered form actions.
+func TestUsersListRendersFiltersAndInlinePanel(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+
+	store := &fakeStore{
+		apps: map[string]App{"ci-notifier": {ID: "ci-notifier", Active: true}},
+		users: []UserRow{
+			{TelegramID: 42, Username: "kim.jieun", Grade: "user", Subscriptions: []string{"ci-notifier"}},
+			{TelegramID: 7, Username: "park.minsu", Grade: "developer"},
+		},
+	}
+	cfg := testConfig(t, target.URL)
+	handler, err := NewServer(cfg, store, nil, nil)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	cookies := loginSession(t, handler, cfg)
+
+	get := func(path string) string {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		for _, c := range cookies {
+			req.AddCookie(c)
+		}
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s: %d", path, rec.Code)
+		}
+		return rec.Body.String()
+	}
+
+	body := get("/users")
+	for _, want := range []string{"kim.jieun", "park.minsu", "일반 사용자", "개발자", "사용자 2명"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected %q on users list", want)
+		}
+	}
+
+	filtered := get("/users?grade=developer")
+	if strings.Contains(filtered, "kim.jieun") || !strings.Contains(filtered, "park.minsu") {
+		t.Error("grade filter must hide non-matching users")
+	}
+
+	selected := get("/users?selected=42")
+	for _, want := range []string{
+		"선택됨",
+		`action="/users/42/grade"`,
+		`action="/users/42/subscriptions/ci-notifier/delete"`,
+		`action="/users/42/subscriptions"`,
+	} {
+		if !strings.Contains(selected, want) {
+			t.Errorf("expected %q in the inline panel", want)
+		}
 	}
 }

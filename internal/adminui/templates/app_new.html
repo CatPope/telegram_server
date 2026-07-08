@@ -1,26 +1,29 @@
 {{define "content"}}
-<h1>앱 등록</h1>
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
-<form method="post" action="/apps" class="card">
-  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-  <label for="id">ID</label>
-  <input type="text" id="id" name="id" pattern="[a-z0-9][a-z0-9_-]{2,63}" required autofocus>
-  <label for="name">Name</label>
-  <input type="text" id="name" name="name" required>
-  <label for="description">Description</label>
-  <input type="text" id="description" name="description">
-  <label for="min_grade">Min Grade</label>
-  <select id="min_grade" name="min_grade">
-    <option value="user">user</option>
-    <option value="developer">developer</option>
-    <option value="admin">admin</option>
-  </select>
-  <fieldset>
-    <legend>Capabilities</legend>
+<div class="card" style="max-width:600px">
+  <h2>앱 등록</h2>
+  <p class="caption">POST /admin/apps · CSRF 검증됨</p>
+  <form method="post" action="/apps">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <label class="field" for="id">app_id</label>
+    <input type="text" id="id" name="id" class="mono" pattern="[a-z0-9][a-z0-9_-]{2,63}" required autofocus style="margin-bottom:14px">
+    <label class="field" for="name">이름</label>
+    <input type="text" id="name" name="name" required style="margin-bottom:14px">
+    <label class="field" for="description">설명</label>
+    <input type="text" id="description" name="description" style="margin-bottom:14px">
+    <label class="field" for="min_grade">최소 등급 (min_grade)</label>
+    <select id="min_grade" name="min_grade" style="margin-bottom:16px">
+      <option value="user">user</option>
+      <option value="developer">developer</option>
+      <option value="admin">admin</option>
+    </select>
+    <label class="field">capabilities</label>
     {{range .GrantableCapabilities}}
-    <label><input type="checkbox" name="capabilities" value="{{.}}"> {{.}}</label>
+    <label class="checkrow"><input type="checkbox" name="capabilities" value="{{.}}"> {{.}}</label>
     {{end}}
-  </fieldset>
-  <button type="submit">등록</button>
-</form>
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button type="submit" class="btn btn-primary">등록</button>
+      <a href="/apps" class="btn btn-outline">취소</a>
+    </div>
+  </form>
+</div>
 {{end}}

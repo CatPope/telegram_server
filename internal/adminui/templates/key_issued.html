@@ -1,11 +1,14 @@
 {{define "content"}}
-<h1>키 발급 완료</h1>
-<p class="success">새 API 키가 발급되었습니다.</p>
-<div class="card">
-  <p><strong>이 평문 키는 지금 딱 한 번만 표시됩니다.</strong>
-  이 페이지를 벗어나면 다시 볼 수 없습니다 — 서버에는 해시만 저장되며,
-  분실 시 폐기 후 재발급해야 합니다. 지금 안전한 곳에 복사하세요.</p>
-  <p><code class="key-plain">{{.PlaintextKey}}</code></p>
+<div class="banner banner-warn" style="max-width:680px">⚠️ 이 평문 키는 <strong>지금 한 번만</strong> 표시됩니다. 페이지를 벗어나면 다시 볼 수 없습니다 — URL·브라우저 히스토리·access log·캐시 어디에도 남지 않습니다.</div>
+
+<div class="card" style="max-width:680px">
+  <h2 style="color:#15803d">✓ 키 발급 완료</h2>
+  <p class="caption">app_id <span class="mono">{{.AppID}}</span> · prefix <span class="mono">{{.IssuedPrefix}}</span>{{if .IssuedLabel}} · label {{.IssuedLabel}}{{end}}</p>
+  <div class="key-plain">
+    <span class="klabel">평문 API 키 (1회 표시)</span>
+    <code>{{.PlaintextKey}}</code>
+  </div>
+  <p class="caption" style="margin:14px 0 16px">감사 로그에 <code>key_issued</code> 이벤트가 <code>prefix</code>만 남기고 기록됨 (평문·해시 미기록). 서버에는 Argon2id 해시만 저장되며, 분실 시 폐기 후 재발급해야 합니다.</p>
+  <a class="btn btn-dark" href="/keys">저장했습니다 — 키 목록으로</a>
 </div>
-<p class="actions"><a class="button" href="/apps/{{.AppID}}/keys">키 목록으로</a></p>
 {{end}}

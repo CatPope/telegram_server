@@ -1,50 +1,153 @@
 {{define "content"}}
-<h1>Users</h1>
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
-{{if .Success}}<p class="success">{{.Success}}</p>{{end}}
+{{if .DBUnavailable}}
+<div class="banner banner-warn">DB 미연결 — 사용자 목록을 표시할 수 없습니다. 아래에서 텔레그램 ID를 직접 입력해 관리할 수 있습니다.</div>
 
-<h2>텔레그램 ID 조회</h2>
-<form method="get" action="/users" class="card">
-  <label for="telegram_id">Telegram ID</label>
-  <input type="text" id="telegram_id" name="telegram_id" value="{{.TelegramID}}" required>
-  <button type="submit">조회</button>
-</form>
+<div class="card" style="max-width:520px">
+  <h2>텔레그램 ID 조회</h2>
+  <form method="get" action="/users" style="margin-top:12px">
+    <label class="field" for="telegram_id">Telegram ID</label>
+    <input type="text" id="telegram_id" name="telegram_id" value="{{.TelegramID}}" required style="margin-bottom:14px">
+    <button type="submit" class="btn btn-primary">조회</button>
+  </form>
+</div>
 
 {{if .TelegramID}}
-<h2>등급 변경</h2>
-<form method="post" action="/users/{{.TelegramID}}/grade" class="card">
-  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-  <label for="grade">Grade</label>
-  <select id="grade" name="grade">
-    <option value="user">user</option>
-    <option value="developer">developer</option>
-    <option value="admin">admin</option>
-  </select>
-  <button type="submit">변경</button>
-</form>
+<div class="card" style="max-width:520px">
+  <h2>등급 변경</h2>
+  <form method="post" action="/users/{{.TelegramID}}/grade" style="margin-top:12px">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <select name="grade" style="margin-bottom:14px">
+      <option value="user">user</option>
+      <option value="developer">developer</option>
+      <option value="admin">admin</option>
+    </select>
+    <button type="submit" class="btn btn-primary">변경</button>
+  </form>
+</div>
 
-<h2>구독 추가</h2>
-<form method="post" action="/users/{{.TelegramID}}/subscriptions" class="card">
-  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-  <label for="app_id">App ID</label>
-  <input type="text" id="app_id" name="app_id" required>
-  <button type="submit">구독 추가</button>
-</form>
+<div class="card" style="max-width:520px">
+  <h2>구독 추가</h2>
+  <form method="post" action="/users/{{.TelegramID}}/subscriptions" style="margin-top:12px">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <label class="field" for="app_id">App ID</label>
+    <input type="text" id="app_id" name="app_id" class="mono" required style="margin-bottom:14px">
+    <button type="submit" class="btn btn-primary">구독 추가</button>
+  </form>
+</div>
 
-<h2>구독 해제</h2>
-<form method="get" action="/users" class="card">
-  <input type="hidden" name="telegram_id" value="{{.TelegramID}}">
-  <label for="unsub_app_id">App ID</label>
-  <input type="text" id="unsub_app_id" name="app_id" value="{{.UnsubAppID}}" required>
-  <button type="submit">해제 대상 확인</button>
-</form>
-
-{{if .UnsubAppID}}
-<form method="post" action="/users/{{.TelegramID}}/subscriptions/{{.UnsubAppID}}/delete" class="card">
-  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-  <p>Telegram ID <strong>{{.TelegramID}}</strong>의 <strong>{{.UnsubAppID}}</strong> 구독을 해제합니다.</p>
-  <button type="submit">구독 해제 확정</button>
-</form>
+<div class="card" style="max-width:520px">
+  <h2>구독 해제</h2>
+  <form method="get" action="/users" style="margin-top:12px">
+    <input type="hidden" name="telegram_id" value="{{.TelegramID}}">
+    <label class="field" for="unsub_app_id">App ID</label>
+    <input type="text" id="unsub_app_id" name="app_id" class="mono" value="{{.UnsubAppID}}" required style="margin-bottom:14px">
+    <button type="submit" class="btn btn-outline">해제 대상 확인</button>
+  </form>
+  {{if .UnsubAppID}}
+  <form method="post" action="/users/{{.TelegramID}}/subscriptions/{{.UnsubAppID}}/delete" style="margin-top:12px">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <p style="font-size:14px">Telegram ID <strong>{{.TelegramID}}</strong>의 <strong class="mono">{{.UnsubAppID}}</strong> 구독을 해제합니다.</p>
+    <button type="submit" class="btn btn-danger">구독 해제 확정</button>
+  </form>
+  {{end}}
+</div>
 {{end}}
+
+{{else}}
+{{$v := .UsersView}}
+<div class="toolbar">
+  <span class="tlabel"><strong style="color:#111827">사용자 {{$v.Count}}명</strong></span>
+  <form method="get" action="/users" style="display:flex;align-items:center;gap:12px;flex:1;flex-wrap:wrap;margin:0">
+    <span class="tlabel">권한</span>
+    <select name="grade" style="width:auto;min-width:120px">
+      <option value="">전체</option>
+      <option value="user" {{if eq $v.Grade "user"}}selected{{end}}>일반 사용자</option>
+      <option value="developer" {{if eq $v.Grade "developer"}}selected{{end}}>개발자</option>
+      <option value="admin" {{if eq $v.Grade "admin"}}selected{{end}}>관리자</option>
+    </select>
+    <span class="tlabel">구독 앱</span>
+    <select name="app" style="width:auto;min-width:140px">
+      <option value="">전체</option>
+      {{range .Apps}}<option value="{{.ID}}" {{if eq .ID $v.App}}selected{{end}}>{{.ID}}</option>{{end}}
+    </select>
+    <span class="spacer"></span>
+    <input type="text" name="q" value="{{$v.Query}}" placeholder="id 검색" class="mono" style="width:180px">
+    <button type="submit" class="btn btn-outline" style="padding:8px 12px">적용</button>
+  </form>
+</div>
+
+<div class="card table-card">
+<table>
+  <thead>
+    <tr><th>USER ID</th><th>권한</th><th>구독</th><th></th></tr>
+  </thead>
+  <tbody>
+  {{range $v.Users}}
+    {{$isSel := and $v.Selected (eq $v.Selected.TelegramID .TelegramID)}}
+    <tr {{if $isSel}}class="selected"{{end}}>
+      <td class="mono">{{.TelegramID}}{{if .Username}}<div class="cell-sub">{{.Username}}</div>{{end}}</td>
+      <td><span class="badge {{.GradeBadge}}">{{.GradeLabel}}</span></td>
+      <td style="color:#4b5563">{{if .Subscriptions}}구독 {{len .Subscriptions}}{{else}}—{{end}}</td>
+      <td style="text-align:right">
+        {{if $isSel}}
+        <span style="color:#2563eb;font-size:13px">● 선택됨</span>
+        {{else}}
+        <a class="rowlink" href="/users?selected={{.TelegramID}}{{if $v.Grade}}&grade={{$v.Grade}}{{end}}{{if $v.App}}&app={{$v.App}}{{end}}{{if $v.Query}}&q={{$v.Query}}{{end}}">관리 →</a>
+        {{end}}
+      </td>
+    </tr>
+    {{if $isSel}}
+    <tr class="panel-row">
+      <td colspan="4">
+        {{$sel := $v.Selected}}
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span class="mono" style="font-size:16px;font-weight:700">{{$sel.TelegramID}}</span>
+            <span class="badge {{$sel.GradeBadge}}">{{$sel.GradeLabel}}</span>
+          </div>
+          <a class="rowlink" style="color:#6b7280" href="/users{{if $v.Grade}}?grade={{$v.Grade}}{{end}}">닫기 ✕</a>
+        </div>
+        <p class="caption">CSP 무-JS 제약 하 서버가 구체 action 렌더 · PATCH /admin/users/{{$sel.TelegramID}}</p>
+
+        <form method="post" action="/users/{{$sel.TelegramID}}/grade">
+          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+          <label class="field">권한 변경</label>
+          <div class="gradeopts">
+            <input type="radio" id="g-user" name="grade" value="user" {{if eq $sel.Grade "user"}}checked{{end}}><label for="g-user">일반 사용자</label>
+            <input type="radio" id="g-dev" name="grade" value="developer" {{if eq $sel.Grade "developer"}}checked{{end}}><label for="g-dev">개발자</label>
+            <input type="radio" id="g-admin" name="grade" value="admin" {{if eq $sel.Grade "admin"}}checked{{end}}><label for="g-admin">관리자</label>
+          </div>
+          <button type="submit" class="btn btn-primary">권한 저장</button>
+        </form>
+
+        <label class="field" style="margin-top:20px">구독</label>
+        {{range $sel.Subscriptions}}
+        <div class="subrow">
+          <span class="mono" style="font-size:13.5px">{{.}}</span>
+          <form method="post" action="/users/{{$sel.TelegramID}}/subscriptions/{{.}}/delete">
+            <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+            <button type="submit" class="btn-unsub">해제</button>
+          </form>
+        </div>
+        {{else}}
+        <p class="caption">구독 중인 앱이 없습니다</p>
+        {{end}}
+
+        <form method="post" action="/users/{{$sel.TelegramID}}/subscriptions" style="display:flex;gap:10px;margin-top:8px">
+          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+          <select name="app_id" style="flex:1">
+            {{range $.Apps}}{{if .Active}}<option value="{{.ID}}">{{.ID}}</option>{{end}}{{end}}
+          </select>
+          <button type="submit" class="btn btn-dark">구독 추가</button>
+        </form>
+      </td>
+    </tr>
+    {{end}}
+  {{else}}
+    <tr><td colspan="4" style="color:#6b7280">조건에 맞는 사용자가 없습니다</td></tr>
+  {{end}}
+  </tbody>
+</table>
+</div>
 {{end}}
 {{end}}

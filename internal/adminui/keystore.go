@@ -17,14 +17,21 @@ import (
 // the read-only Store so the type system documents exactly where writes
 // can originate. Hashes are write-only — no method ever returns key_hash.
 type KeyStore interface {
+	// ListKeys lists an app's keys; appID == "" lists every app's keys
+	// (the global /keys page).
 	ListKeys(ctx context.Context, appID string) ([]KeyRow, error)
 	IssueKey(ctx context.Context, appID, prefix, hash, label string) error
 	RevokeKey(ctx context.Context, appID, prefix string) error
+	// UpdateKeyLabel renames a key's free-text label. The prefix itself is
+	// immutable — it is baked into the plaintext token (tg_<prefix>_<secret>)
+	// and used for lookup, so "renaming" it would orphan the key.
+	UpdateKeyLabel(ctx context.Context, appID, prefix, label string) error
 }
 
 // KeyRow is a display projection of an app_keys row. It deliberately has
 // no hash field.
 type KeyRow struct {
+	AppID     string
 	Prefix    string
 	Label     string
 	CreatedAt time.Time
@@ -58,10 +65,12 @@ func NewKeyStore(pool *pgxpool.Pool) KeyStore {
 }
 
 func (s *pgKeyStore) ListKeys(ctx context.Context, appID string) ([]KeyRow, error) {
+	// $1 == '' disables the app filter — the global /keys page lists every
+	// app's keys in one table.
 	const q = `
-		SELECT key_prefix, label, created_at, revoked_at
+		SELECT app_id, key_prefix, label, created_at, revoked_at
 		FROM app_keys
-		WHERE app_id = $1
+		WHERE $1 = '' OR app_id = $1
 		ORDER BY created_at DESC, id DESC`
 
 	ctx, cancel := context.WithTimeout(ctx, storeQueryTimeout)
@@ -75,7 +84,7 @@ func (s *pgKeyStore) ListKeys(ctx context.Context, appID string) ([]KeyRow, erro
 	var keys []KeyRow
 	for rows.Next() {
 		var k KeyRow
-		if scanErr := rows.Scan(&k.Prefix, &k.Label, &k.CreatedAt, &k.RevokedAt); scanErr != nil {
+		if scanErr := rows.Scan(&k.AppID, &k.Prefix, &k.Label, &k.CreatedAt, &k.RevokedAt); scanErr != nil {
 			return nil, fmt.Errorf("adminui: scan key: %w", scanErr)
 		}
 		keys = append(keys, k)
@@ -150,6 +159,25 @@ func (s *pgKeyStore) RevokeKey(ctx context.Context, appID, prefix string) error 
 	)
 	if err != nil {
 		return fmt.Errorf("adminui: revoke key: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrKeyNotFound
+	}
+	return nil
+}
+
+// UpdateKeyLabel is scoped to (app_id, key_prefix) like RevokeKey, and only
+// touches the cosmetic label column — never hash or prefix.
+func (s *pgKeyStore) UpdateKeyLabel(ctx context.Context, appID, prefix, label string) error {
+	ctx, cancel := context.WithTimeout(ctx, storeQueryTimeout)
+	defer cancel()
+
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE app_keys SET label = $1 WHERE key_prefix = $2 AND app_id = $3 AND revoked_at IS NULL`,
+		label, prefix, appID,
+	)
+	if err != nil {
+		return fmt.Errorf("adminui: update key label: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrKeyNotFound

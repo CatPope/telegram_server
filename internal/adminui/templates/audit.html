@@ -1,51 +1,63 @@
 {{define "content"}}
-<h1>Audit</h1>
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<div class="card">
+  <h2 style="font-size:14px">GET /admin/audit/search — 필터 (서버가 단일 검증자)</h2>
+  <form method="get" action="/audit" style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-top:12px">
+    <div style="min-width:160px">
+      <label class="field" for="stage">stage</label>
+      <select id="stage" name="stage">
+        <option value="">전체</option>
+        {{$selected := .AuditFilters.Stage}}
+        {{range .AuditStages}}
+        <option value="{{.}}"{{if eq . $selected}} selected{{end}}>{{.}}</option>
+        {{end}}
+      </select>
+    </div>
+    <div style="min-width:150px">
+      <label class="field" for="app_id">app_id</label>
+      <input type="text" id="app_id" name="app_id" class="mono" value="{{.AuditFilters.AppID}}" placeholder="전체">
+    </div>
+    <div style="min-width:150px">
+      <label class="field" for="trace_id">trace_id</label>
+      <input type="text" id="trace_id" name="trace_id" class="mono" value="{{.AuditFilters.TraceID}}" placeholder="전체">
+    </div>
+    <div style="width:90px">
+      <label class="field" for="limit">limit</label>
+      <input type="text" id="limit" name="limit" value="{{.AuditFilters.Limit}}" inputmode="numeric" placeholder="50">
+    </div>
+    <div style="min-width:180px">
+      <label class="field" for="since">since (RFC3339)</label>
+      <input type="text" id="since" name="since" class="mono" value="{{.AuditFilters.Since}}" placeholder="2026-07-06T00:00:00Z">
+    </div>
+    <div style="min-width:180px">
+      <label class="field" for="until">until (RFC3339)</label>
+      <input type="text" id="until" name="until" class="mono" value="{{.AuditFilters.Until}}" placeholder="전체">
+    </div>
+    <button type="submit" class="btn btn-primary">검색</button>
+  </form>
+</div>
 
-<form method="get" action="/audit" class="card">
-  <label for="limit">Limit (1~500, 기본 50)</label>
-  <input type="text" id="limit" name="limit" value="{{.AuditFilters.Limit}}" inputmode="numeric">
-  <label for="since">Since (RFC3339, 예: 2026-07-06T00:00:00Z)</label>
-  <input type="text" id="since" name="since" value="{{.AuditFilters.Since}}">
-  <label for="until">Until (RFC3339)</label>
-  <input type="text" id="until" name="until" value="{{.AuditFilters.Until}}">
-  <label for="trace_id">Trace ID</label>
-  <input type="text" id="trace_id" name="trace_id" value="{{.AuditFilters.TraceID}}">
-  <label for="app_id">App ID</label>
-  <input type="text" id="app_id" name="app_id" value="{{.AuditFilters.AppID}}">
-  <label for="stage">Stage</label>
-  <select id="stage" name="stage">
-    <option value="">(전체)</option>
-    {{$selected := .AuditFilters.Stage}}
-    {{range .AuditStages}}
-    <option value="{{.}}"{{if eq . $selected}} selected{{end}}>{{.}}</option>
-    {{end}}
-  </select>
-  <button type="submit">검색</button>
-</form>
-
+<div class="card table-card">
 <table>
   <thead>
     <tr>
-      <th>At</th><th>Stage</th><th>App</th><th>Endpoint</th>
-      <th>Channel</th><th>Recipient</th><th>Error</th><th>Trace ID</th>
+      <th>STAGE</th><th>APP_ID</th><th>ENDPOINT</th><th>RECIPIENT</th><th>ERROR</th><th>TRACE_ID</th><th style="text-align:right">시각</th>
     </tr>
   </thead>
   <tbody>
   {{range .AuditRows}}
   <tr>
-    <td>{{.At}}</td>
-    <td>{{.Stage}}</td>
-    <td>{{.AppID}}</td>
-    <td>{{.Endpoint}}</td>
-    <td>{{.DeliveryChannel}}</td>
-    <td>{{.Recipient}}</td>
-    <td>{{if .ErrorCode}}<span class="status-bad">{{.ErrorCode}}</span>{{end}}</td>
-    <td><code>{{.TraceID}}</code></td>
+    <td><span class="badge badge-mono {{.StageBadge}}">{{.Stage}}</span></td>
+    <td class="mono">{{if .AppID}}{{.AppID}}{{else}}-{{end}}</td>
+    <td class="mono" style="color:#4b5563;font-size:13px">{{.Endpoint}}</td>
+    <td class="mono" style="color:#4b5563;font-size:13px">{{.Recipient}}</td>
+    <td>{{if .ErrorCode}}<span class="badge badge-red badge-mono">{{.ErrorCode}}</span>{{end}}</td>
+    <td class="mono" style="color:#4b5563;font-size:13px">{{.TraceID}}</td>
+    <td class="mono" style="color:#4b5563;text-align:right;white-space:nowrap">{{.At}}</td>
   </tr>
   {{else}}
-  <tr><td colspan="8">결과가 없습니다</td></tr>
+  <tr><td colspan="7" style="color:#6b7280">결과가 없습니다</td></tr>
   {{end}}
   </tbody>
 </table>
+</div>
 {{end}}

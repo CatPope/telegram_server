@@ -24,6 +24,7 @@ type fakeKeyStore struct {
 	rows      map[string][]KeyRow // appID → rows
 	issueErr  error
 	revokeErr error
+	labelErr  error
 
 	issued struct {
 		appID, prefix, hash, label string
@@ -31,10 +32,27 @@ type fakeKeyStore struct {
 	issueCalls  int
 	revoked     []string
 	revokeCalls int
+	relabeled   []string
+	labelCalls  int
 }
 
 func (f *fakeKeyStore) ListKeys(_ context.Context, appID string) ([]KeyRow, error) {
-	return f.rows[appID], nil
+	stamp := func(app string, rows []KeyRow) []KeyRow {
+		out := make([]KeyRow, len(rows))
+		for i, k := range rows {
+			k.AppID = app
+			out[i] = k
+		}
+		return out
+	}
+	if appID != "" {
+		return stamp(appID, f.rows[appID]), nil
+	}
+	var all []KeyRow
+	for app, rows := range f.rows {
+		all = append(all, stamp(app, rows)...)
+	}
+	return all, nil
 }
 
 func (f *fakeKeyStore) IssueKey(_ context.Context, appID, prefix, hash, label string) error {
@@ -54,6 +72,20 @@ func (f *fakeKeyStore) RevokeKey(_ context.Context, appID, prefix string) error 
 	for _, k := range f.rows[appID] {
 		if k.Prefix == prefix && k.RevokedAt == nil {
 			f.revoked = append(f.revoked, prefix)
+			return nil
+		}
+	}
+	return ErrKeyNotFound
+}
+
+func (f *fakeKeyStore) UpdateKeyLabel(_ context.Context, appID, prefix, label string) error {
+	f.labelCalls++
+	if f.labelErr != nil {
+		return f.labelErr
+	}
+	for _, k := range f.rows[appID] {
+		if k.Prefix == prefix && k.RevokedAt == nil {
+			f.relabeled = append(f.relabeled, prefix+"="+label)
 			return nil
 		}
 	}
@@ -117,7 +149,7 @@ func TestKeysListDBUnavailableWithoutKeystore(t *testing.T) {
 	handler, cookies, closeTarget := keysTestServer(t, nil, nil)
 	defer closeTarget()
 
-	rec := getPage(t, handler, cookies, "/apps/ci-notifier/keys")
+	rec := getPage(t, handler, cookies, "/keys")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
@@ -125,8 +157,21 @@ func TestKeysListDBUnavailableWithoutKeystore(t *testing.T) {
 	if !strings.Contains(body, "키 관리는 DB 연결이 필요합니다") {
 		t.Error("expected DB-unavailable notice")
 	}
-	if strings.Contains(body, `action="/apps/ci-notifier/keys"`) {
+	if strings.Contains(body, `name="prefix"`) {
 		t.Error("issue form should not render without a keystore")
+	}
+}
+
+func TestLegacyAppKeysURLRedirectsToGlobalPage(t *testing.T) {
+	handler, cookies, closeTarget := keysTestServer(t, nil, nil)
+	defer closeTarget()
+
+	rec := getPage(t, handler, cookies, "/apps/ci-notifier/keys")
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303 redirect, got %d", rec.Code)
+	}
+	if loc := rec.Header().Get("Location"); loc != "/keys?app=ci-notifier" {
+		t.Errorf("Location = %q", loc)
 	}
 }
 
@@ -141,21 +186,33 @@ func TestKeysListRendersActiveAndRevokedRows(t *testing.T) {
 	handler, cookies, closeTarget := keysTestServer(t, keys, nil)
 	defer closeTarget()
 
-	rec := getPage(t, handler, cookies, "/apps/ci-notifier/keys")
+	// status=all shows both; the default (active) hides the revoked row.
+	rec := getPage(t, handler, cookies, "/keys?status=all")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"livekey1", "oldkey99", "active", "revoked"} {
+	for _, want := range []string{"livekey1", "oldkey99", "활성", "폐기됨"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected %q in keys list", want)
 		}
 	}
-	if !strings.Contains(body, `action="/apps/ci-notifier/keys/livekey1/revoke"`) {
+	if !strings.Contains(body, `action="/keys/ci-notifier/livekey1/revoke"`) {
 		t.Error("expected a revoke form for the active key")
 	}
-	if strings.Contains(body, `action="/apps/ci-notifier/keys/oldkey99/revoke"`) {
+	if strings.Contains(body, `action="/keys/ci-notifier/oldkey99/revoke"`) {
 		t.Error("revoked key must not offer another revoke form")
+	}
+
+	activeOnly := getPage(t, handler, cookies, "/keys").Body.String()
+	if strings.Contains(activeOnly, "oldkey99") {
+		t.Error("default active filter must hide revoked keys")
+	}
+
+	// The group-by-app view renders per-app sections.
+	grouped := getPage(t, handler, cookies, "/keys?group=app&status=all")
+	if grouped.Code != http.StatusOK || !strings.Contains(grouped.Body.String(), "livekey1") {
+		t.Errorf("group=app view failed: %d", grouped.Code)
 	}
 }
 
@@ -165,11 +222,12 @@ func TestKeyIssueRendersPlaintextOnceAndHashVerifies(t *testing.T) {
 	handler, cookies, closeTarget := keysTestServer(t, keys, auditW)
 	defer closeTarget()
 
-	listRec := getPage(t, handler, cookies, "/apps/ci-notifier/keys")
+	listRec := getPage(t, handler, cookies, "/keys?new=1")
 	token := extractCSRFToken(t, listRec.Body.String())
 
-	rec := postForm(t, handler, cookies, "/apps/ci-notifier/keys", url.Values{
+	rec := postForm(t, handler, cookies, "/keys", url.Values{
 		"csrf_token": {token},
+		"app_id":     {"ci-notifier"},
 		"prefix":     {"cinotif1"},
 		"label":      {"CI 알림"},
 	})
@@ -183,7 +241,7 @@ func TestKeyIssueRendersPlaintextOnceAndHashVerifies(t *testing.T) {
 		t.Errorf("issue response must not redirect, got Location %q", loc)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "딱 한 번만 표시") {
+	if !strings.Contains(body, "지금 한 번만") {
 		t.Error("expected the one-time warning on the issued page")
 	}
 
@@ -220,12 +278,13 @@ func TestKeyIssueRejectsInvalidPrefix(t *testing.T) {
 	handler, cookies, closeTarget := keysTestServer(t, keys, nil)
 	defer closeTarget()
 
-	listRec := getPage(t, handler, cookies, "/apps/ci-notifier/keys")
+	listRec := getPage(t, handler, cookies, "/keys")
 	token := extractCSRFToken(t, listRec.Body.String())
 
 	for _, bad := range []string{"", "abc", "UPPER123", "has_underscore", "has-dash1", "waytoolongprefix1"} {
-		rec := postForm(t, handler, cookies, "/apps/ci-notifier/keys", url.Values{
+		rec := postForm(t, handler, cookies, "/keys", url.Values{
 			"csrf_token": {token},
+			"app_id":     {"ci-notifier"},
 			"prefix":     {bad},
 		})
 		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "영소문자/숫자 4~16자") {
@@ -237,16 +296,38 @@ func TestKeyIssueRejectsInvalidPrefix(t *testing.T) {
 	}
 }
 
+func TestKeyIssueRejectsInvalidAppID(t *testing.T) {
+	keys := &fakeKeyStore{}
+	handler, cookies, closeTarget := keysTestServer(t, keys, nil)
+	defer closeTarget()
+
+	listRec := getPage(t, handler, cookies, "/keys")
+	token := extractCSRFToken(t, listRec.Body.String())
+
+	rec := postForm(t, handler, cookies, "/keys", url.Values{
+		"csrf_token": {token},
+		"app_id":     {"UPPER!!"},
+		"prefix":     {"cinotif1"},
+	})
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "앱 ID 형식이 올바르지 않습니다") {
+		t.Fatalf("expected app-id validation banner, got %d", rec.Code)
+	}
+	if keys.issueCalls != 0 {
+		t.Error("IssueKey must not be called for an invalid app_id")
+	}
+}
+
 func TestKeyIssueRejectsOverlongLabel(t *testing.T) {
 	keys := &fakeKeyStore{}
 	handler, cookies, closeTarget := keysTestServer(t, keys, nil)
 	defer closeTarget()
 
-	listRec := getPage(t, handler, cookies, "/apps/ci-notifier/keys")
+	listRec := getPage(t, handler, cookies, "/keys")
 	token := extractCSRFToken(t, listRec.Body.String())
 
-	rec := postForm(t, handler, cookies, "/apps/ci-notifier/keys", url.Values{
+	rec := postForm(t, handler, cookies, "/keys", url.Values{
 		"csrf_token": {token},
+		"app_id":     {"ci-notifier"},
 		"prefix":     {"cinotif1"},
 		"label":      {strings.Repeat("가", keyLabelMaxLen+1)},
 	})
@@ -272,16 +353,17 @@ func TestKeyIssueMapsStoreErrors(t *testing.T) {
 		auditW := &fakeAuditWriter{}
 		handler, cookies, closeTarget := keysTestServer(t, keys, auditW)
 
-		listRec := getPage(t, handler, cookies, "/apps/ci-notifier/keys")
+		listRec := getPage(t, handler, cookies, "/keys")
 		token := extractCSRFToken(t, listRec.Body.String())
-		rec := postForm(t, handler, cookies, "/apps/ci-notifier/keys", url.Values{
+		rec := postForm(t, handler, cookies, "/keys", url.Values{
 			"csrf_token": {token},
+			"app_id":     {"ci-notifier"},
 			"prefix":     {"cinotif1"},
 		})
 		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), tc.want) {
 			t.Errorf("%v: expected %q banner, got %d", tc.err, tc.want, rec.Code)
 		}
-		if strings.Contains(rec.Body.String(), "딱 한 번만 표시") {
+		if strings.Contains(rec.Body.String(), "지금 한 번만") {
 			t.Errorf("%v: failed issue must not render the issued page", tc.err)
 		}
 		if len(auditW.events) != 0 {
@@ -296,7 +378,8 @@ func TestKeyIssueWithoutCSRFIsForbidden(t *testing.T) {
 	handler, cookies, closeTarget := keysTestServer(t, keys, nil)
 	defer closeTarget()
 
-	rec := postForm(t, handler, cookies, "/apps/ci-notifier/keys", url.Values{
+	rec := postForm(t, handler, cookies, "/keys", url.Values{
+		"app_id": {"ci-notifier"},
 		"prefix": {"cinotif1"},
 	})
 	if rec.Code != http.StatusForbidden {
@@ -320,10 +403,11 @@ func TestKeyIssuePlaintextNeverLogged(t *testing.T) {
 	handler, cookies, closeTarget := keysTestServer(t, keys, auditW)
 	defer closeTarget()
 
-	listRec := getPage(t, handler, cookies, "/apps/ci-notifier/keys")
+	listRec := getPage(t, handler, cookies, "/keys")
 	token := extractCSRFToken(t, listRec.Body.String())
-	rec := postForm(t, handler, cookies, "/apps/ci-notifier/keys", url.Values{
+	rec := postForm(t, handler, cookies, "/keys", url.Values{
 		"csrf_token": {token},
+		"app_id":     {"ci-notifier"},
 		"prefix":     {"cinotif1"},
 	})
 	if rec.Code != http.StatusOK {
@@ -364,13 +448,14 @@ func TestKeyAuditWriteFailureIsLoggedNotFatal(t *testing.T) {
 	handler, cookies, closeTarget := keysTestServer(t, keys, auditW)
 	defer closeTarget()
 
-	listRec := getPage(t, handler, cookies, "/apps/ci-notifier/keys")
+	listRec := getPage(t, handler, cookies, "/keys")
 	token := extractCSRFToken(t, listRec.Body.String())
-	rec := postForm(t, handler, cookies, "/apps/ci-notifier/keys", url.Values{
+	rec := postForm(t, handler, cookies, "/keys", url.Values{
 		"csrf_token": {token},
+		"app_id":     {"ci-notifier"},
 		"prefix":     {"cinotif1"},
 	})
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "딱 한 번만 표시") {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "지금 한 번만") {
 		t.Fatalf("issuance must succeed despite audit failure, got %d", rec.Code)
 	}
 	if !strings.Contains(logs.String(), "adminui_audit_write_failed") {
@@ -386,17 +471,17 @@ func TestKeyRevokeFlow(t *testing.T) {
 	handler, cookies, closeTarget := keysTestServer(t, keys, auditW)
 	defer closeTarget()
 
-	listRec := getPage(t, handler, cookies, "/apps/ci-notifier/keys")
+	listRec := getPage(t, handler, cookies, "/keys")
 	token := extractCSRFToken(t, listRec.Body.String())
 
-	rec := postForm(t, handler, cookies, "/apps/ci-notifier/keys/livekey1/revoke", url.Values{
+	rec := postForm(t, handler, cookies, "/keys/ci-notifier/livekey1/revoke", url.Values{
 		"csrf_token": {token},
 		"confirm":    {"1"},
 	})
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("expected redirect, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if loc := rec.Header().Get("Location"); loc != "/apps/ci-notifier/keys?revoked=1" {
+	if loc := rec.Header().Get("Location"); loc != "/keys?revoked=1" {
 		t.Errorf("Location = %q", loc)
 	}
 	if len(keys.revoked) != 1 || keys.revoked[0] != "livekey1" {
@@ -406,7 +491,7 @@ func TestKeyRevokeFlow(t *testing.T) {
 		t.Errorf("expected a key_revoked audit event with the prefix, got %+v", auditW.events)
 	}
 
-	confirmed := getPage(t, handler, cookies, "/apps/ci-notifier/keys?revoked=1")
+	confirmed := getPage(t, handler, cookies, "/keys?revoked=1")
 	if !strings.Contains(confirmed.Body.String(), "키가 폐기되었습니다") {
 		t.Error("expected revoked success banner")
 	}
@@ -422,10 +507,10 @@ func TestKeyRevokeIsScopedToApp(t *testing.T) {
 	handler, cookies, closeTarget := keysTestServer(t, keys, auditW)
 	defer closeTarget()
 
-	listRec := getPage(t, handler, cookies, "/apps/ci-notifier/keys")
+	listRec := getPage(t, handler, cookies, "/keys")
 	token := extractCSRFToken(t, listRec.Body.String())
 
-	rec := postForm(t, handler, cookies, "/apps/ci-notifier/keys/otherkey1/revoke", url.Values{
+	rec := postForm(t, handler, cookies, "/keys/ci-notifier/otherkey1/revoke", url.Values{
 		"csrf_token": {token},
 		"confirm":    {"1"},
 	})
@@ -445,13 +530,13 @@ func TestKeyRevokeRequiresConfirmation(t *testing.T) {
 	handler, cookies, closeTarget := keysTestServer(t, keys, nil)
 	defer closeTarget()
 
-	listRec := getPage(t, handler, cookies, "/apps/ci-notifier/keys")
+	listRec := getPage(t, handler, cookies, "/keys")
 	token := extractCSRFToken(t, listRec.Body.String())
 
-	rec := postForm(t, handler, cookies, "/apps/ci-notifier/keys/livekey1/revoke", url.Values{
+	rec := postForm(t, handler, cookies, "/keys/ci-notifier/livekey1/revoke", url.Values{
 		"csrf_token": {token},
 	})
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "확인란을 체크하세요") {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "확인 단계를 거쳐야 합니다") {
 		t.Fatalf("expected confirmation-required banner, got %d", rec.Code)
 	}
 	if keys.revokeCalls != 0 {
@@ -464,10 +549,10 @@ func TestKeyRevokeUnknownKeyShowsError(t *testing.T) {
 	handler, cookies, closeTarget := keysTestServer(t, keys, nil)
 	defer closeTarget()
 
-	listRec := getPage(t, handler, cookies, "/apps/ci-notifier/keys")
+	listRec := getPage(t, handler, cookies, "/keys")
 	token := extractCSRFToken(t, listRec.Body.String())
 
-	rec := postForm(t, handler, cookies, "/apps/ci-notifier/keys/ghostkey1/revoke", url.Values{
+	rec := postForm(t, handler, cookies, "/keys/ci-notifier/ghostkey1/revoke", url.Values{
 		"csrf_token": {token},
 		"confirm":    {"1"},
 	})
@@ -476,9 +561,54 @@ func TestKeyRevokeUnknownKeyShowsError(t *testing.T) {
 	}
 }
 
+func TestKeyLabelUpdateFlow(t *testing.T) {
+	keys := &fakeKeyStore{rows: map[string][]KeyRow{
+		"ci-notifier": {{Prefix: "livekey1", Label: "old", CreatedAt: time.Now()}},
+	}}
+	handler, cookies, closeTarget := keysTestServer(t, keys, nil)
+	defer closeTarget()
+
+	listRec := getPage(t, handler, cookies, "/keys")
+	token := extractCSRFToken(t, listRec.Body.String())
+
+	rec := postForm(t, handler, cookies, "/keys/ci-notifier/livekey1/label", url.Values{
+		"csrf_token": {token},
+		"label":      {"new label"},
+	})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected redirect, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if loc := rec.Header().Get("Location"); loc != "/keys?labeled=1" {
+		t.Errorf("Location = %q", loc)
+	}
+	if len(keys.relabeled) != 1 || keys.relabeled[0] != "livekey1=new label" {
+		t.Errorf("relabeled = %v", keys.relabeled)
+	}
+}
+
+func TestKeyLabelUpdateRejectsOverlongLabel(t *testing.T) {
+	keys := &fakeKeyStore{}
+	handler, cookies, closeTarget := keysTestServer(t, keys, nil)
+	defer closeTarget()
+
+	listRec := getPage(t, handler, cookies, "/keys")
+	token := extractCSRFToken(t, listRec.Body.String())
+
+	rec := postForm(t, handler, cookies, "/keys/ci-notifier/livekey1/label", url.Values{
+		"csrf_token": {token},
+		"label":      {strings.Repeat("가", keyLabelMaxLen+1)},
+	})
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "label은 100자 이하여야 합니다") {
+		t.Fatalf("expected label-length error banner, got %d", rec.Code)
+	}
+	if keys.labelCalls != 0 {
+		t.Error("UpdateKeyLabel must not be called for an overlong label")
+	}
+}
+
 func extractPlaintextKey(t *testing.T, html string) string {
 	t.Helper()
-	m := regexp.MustCompile(`<code class="key-plain">(tg_[a-z0-9]+_[0-9a-f]+)</code>`).FindStringSubmatch(html)
+	m := regexp.MustCompile(`<code>(tg_[a-z0-9]+_[0-9a-f]+)</code>`).FindStringSubmatch(html)
 	if m == nil {
 		t.Fatalf("plaintext key not found in issued page: %s", html)
 	}

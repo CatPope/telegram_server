@@ -4,10 +4,10 @@
 # compose 스택 위에서 관리자 UI의 핵심 운영 흐름을 end-to-end로 실행한다:
 #   1. GET  /login → POST /login          (세션 + CSRF)
 #   2. POST /apps                         (앱 등록, /admin API 경유)
-#   3. POST /apps/{id}/keys               (키 발급, 평문 1회 응답에서 추출)
+#   3. POST /keys                         (키 발급, 평문 1회 응답에서 추출)
 #   4. POST /v1/messages/direct           (발급 키로 대상 서버 직접 호출 → 200)
 #   5. GET  /audit?stage=key_issued       (감사 뷰어에 key_issued 행)
-#   6. POST /apps/{id}/keys/{p}/revoke    (키 폐기)
+#   6. POST /keys/{app}/{p}/revoke        (키 폐기)
 #   7. POST /v1/messages/direct           (폐기 키 → 401)
 #   8. GET  /audit?stage=key_revoked      (감사 뷰어에 key_revoked 행)
 #
@@ -110,11 +110,12 @@ fi
 
 # --- 3. issue key ------------------------------------------------------------
 printf '== Scenario 3: issue key (prefix %s) ==\n' "$KEY_PREFIX"
-csrf=$(fetch_csrf "${ADMINUI_URL}/apps/${APP_ID}/keys" || true)
+csrf=$(fetch_csrf "${ADMINUI_URL}/keys?new=1" || true)
 issue_status=$(curl -s -o "$workdir/key_issued.html" -w '%{http_code}' -m 10 \
     -b "$jar" \
-    -X POST "${ADMINUI_URL}/apps/${APP_ID}/keys" \
+    -X POST "${ADMINUI_URL}/keys" \
     --data-urlencode "csrf_token=${csrf}" \
+    --data-urlencode "app_id=${APP_ID}" \
     --data-urlencode "prefix=${KEY_PREFIX}" \
     --data-urlencode "label=smoke-adminui" || true)
 
@@ -149,9 +150,9 @@ audit_status=$(curl -s -o "$workdir/audit_issued.html" -w '%{http_code}' -m 10 \
     -b "$jar" "${ADMINUI_URL}/audit?stage=key_issued&app_id=${APP_ID}" || true)
 
 # stage 드롭다운/필터 폼에도 key_issued·app_id 문자열이 echo되므로,
-# 결과 테이블 셀(<td>...</td>) 단위로 매칭해야 실제 행 존재를 검증한다.
-if [ "$audit_status" = "200" ] && grep -q "<td>key_issued</td>" "$workdir/audit_issued.html" \
-        && grep -q "<td>${APP_ID}</td>" "$workdir/audit_issued.html"; then
+# 결과 테이블 셀 단위(배지 스팬 >...</, mono 셀)로 매칭해야 실제 행 존재를 검증한다.
+if [ "$audit_status" = "200" ] && grep -q ">key_issued</span>" "$workdir/audit_issued.html" \
+        && grep -q "class=\"mono\">${APP_ID}<" "$workdir/audit_issued.html"; then
     log_pass "audit viewer shows key_issued for ${APP_ID}"
 else
     log_fail "audit key_issued" "status=${audit_status} or row missing"
@@ -160,10 +161,10 @@ fi
 
 # --- 6. revoke key ------------------------------------------------------------
 printf '== Scenario 6: revoke key ==\n'
-csrf=$(fetch_csrf "${ADMINUI_URL}/apps/${APP_ID}/keys" || true)
+csrf=$(fetch_csrf "${ADMINUI_URL}/keys" || true)
 revoke_status=$(curl -s -o "$workdir/revoke.html" -w '%{http_code}' -m 10 \
     -b "$jar" \
-    -X POST "${ADMINUI_URL}/apps/${APP_ID}/keys/${KEY_PREFIX}/revoke" \
+    -X POST "${ADMINUI_URL}/keys/${APP_ID}/${KEY_PREFIX}/revoke" \
     --data-urlencode "csrf_token=${csrf}" \
     --data-urlencode "confirm=1" || true)
 
@@ -194,8 +195,8 @@ printf '== Scenario 8: audit viewer key_revoked row ==\n'
 audit2_status=$(curl -s -o "$workdir/audit_revoked.html" -w '%{http_code}' -m 10 \
     -b "$jar" "${ADMINUI_URL}/audit?stage=key_revoked&app_id=${APP_ID}" || true)
 
-if [ "$audit2_status" = "200" ] && grep -q "<td>key_revoked</td>" "$workdir/audit_revoked.html" \
-        && grep -q "<td>${APP_ID}</td>" "$workdir/audit_revoked.html"; then
+if [ "$audit2_status" = "200" ] && grep -q ">key_revoked</span>" "$workdir/audit_revoked.html" \
+        && grep -q "class=\"mono\">${APP_ID}<" "$workdir/audit_revoked.html"; then
     log_pass "audit viewer shows key_revoked for ${APP_ID}"
 else
     log_fail "audit key_revoked" "status=${audit2_status} or row missing"

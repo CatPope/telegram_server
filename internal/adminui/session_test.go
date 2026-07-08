@@ -20,7 +20,7 @@ func TestSessionSignVerifyRoundTrip(t *testing.T) {
 	expiry := time.Now().Add(time.Hour).Unix()
 	value := sm.sign(expiry, "abc123")
 
-	nonce, ok := sm.verify(value)
+	nonce, _, ok := sm.verify(value)
 	if !ok {
 		t.Fatal("expected verify to succeed")
 	}
@@ -34,7 +34,7 @@ func TestSessionVerifyRejectsExpired(t *testing.T) {
 	expired := time.Now().Add(-time.Minute).Unix()
 	value := sm.sign(expired, "abc123")
 
-	if _, ok := sm.verify(value); ok {
+	if _, _, ok := sm.verify(value); ok {
 		t.Error("expected verify to fail for expired cookie")
 	}
 }
@@ -44,7 +44,7 @@ func TestSessionVerifyRejectsTamperedSignature(t *testing.T) {
 	value := sm.sign(time.Now().Add(time.Hour).Unix(), "abc123")
 	tampered := value[:len(value)-1] + "0"
 
-	if _, ok := sm.verify(tampered); ok {
+	if _, _, ok := sm.verify(tampered); ok {
 		t.Error("expected verify to fail for tampered signature")
 	}
 }
@@ -54,7 +54,7 @@ func TestSessionVerifyRejectsDifferentSecret(t *testing.T) {
 	sm2 := newTestSessionManager(t)
 	value := sm1.sign(time.Now().Add(time.Hour).Unix(), "abc123")
 
-	if _, ok := sm2.verify(value); ok {
+	if _, _, ok := sm2.verify(value); ok {
 		t.Error("expected verify to fail across different session secrets")
 	}
 }
@@ -75,7 +75,7 @@ func TestSessionIssueAndMiddleware(t *testing.T) {
 		t.Fatalf("expected a %s cookie, got %+v", sessionCookieName, cookies)
 	}
 
-	verifiedNonce, ok := sm.verify(cookies[0].Value)
+	verifiedNonce, _, ok := sm.verify(cookies[0].Value)
 	if !ok || verifiedNonce != nonce {
 		t.Fatalf("issued cookie did not verify back to the same nonce: ok=%v nonce=%q want=%q", ok, verifiedNonce, nonce)
 	}
@@ -90,11 +90,11 @@ func TestSessionRevokeInvalidatesVerify(t *testing.T) {
 	}
 	cookie := rec.Result().Cookies()[0]
 
-	if _, ok := sm.verify(cookie.Value); !ok {
+	if _, _, ok := sm.verify(cookie.Value); !ok {
 		t.Fatal("expected cookie to verify before revocation")
 	}
 	sm.Revoke(nonce)
-	if _, ok := sm.verify(cookie.Value); ok {
+	if _, _, ok := sm.verify(cookie.Value); ok {
 		t.Error("expected verify to fail after server-side revocation")
 	}
 }

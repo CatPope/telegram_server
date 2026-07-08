@@ -1,53 +1,62 @@
 {{define "content"}}
-<h1>App: {{.Title}}</h1>
-{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
-{{if .Success}}<p class="success">{{.Success}}</p>{{end}}
 {{if .App}}
-<dl class="card">
-  <dt>Name</dt><dd>{{.App.Name}}</dd>
-  <dt>Description</dt><dd>{{.App.Description}}</dd>
-  <dt>Min Grade</dt><dd>{{.App.MinGrade}}</dd>
-  <dt>Active</dt><dd>{{if .App.Active}}<span class="status-ok">active</span>{{else}}<span class="status-bad">inactive</span>{{end}}</dd>
-  <dt>Capabilities</dt><dd>{{range .App.Capabilities}}{{.}} {{else}}(none){{end}}</dd>
-</dl>
+<div class="card">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+    <div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <span class="mono" style="font-size:18px;font-weight:700">{{.App.ID}}</span>
+        {{if .App.Active}}<span class="badge badge-green">active</span>{{else}}<span class="badge badge-gray">inactive</span>{{end}}
+      </div>
+      <p class="caption" style="margin:8px 0 0">생성일 {{.App.CreatedAt.Format "2006-01-02"}} · <a class="rowlink" href="/keys?app={{.App.ID}}">API 키 관리 →</a></p>
+    </div>
+    <a class="rowlink" href="/apps">← 목록</a>
+  </div>
+</div>
 {{end}}
 
-<p class="actions"><a class="button" href="/apps/{{.AppID}}/keys">키 관리</a></p>
-
 {{if .DBUnavailable}}
-<p>DB 미연결 상태에서는 현재 값을 확인할 수 없어 수정/비활성화 폼을 표시하지 않습니다. <code>DATABASE_URL</code> 연결 후 다시 시도하세요.</p>
+<div class="banner banner-warn">DB 미연결 상태에서는 현재 값을 확인할 수 없어 수정/비활성화 폼을 표시하지 않습니다. <code>DATABASE_URL</code> 연결 후 다시 시도하세요.</div>
 {{else}}
-<h2>수정</h2>
-<form method="post" action="/apps/{{.AppID}}/patch" class="card">
-  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-  <label for="description">Description</label>
-  <input type="text" id="description" name="description" value="{{if .App}}{{.App.Description}}{{end}}">
-  <label for="min_grade">Min Grade</label>
-  <select id="min_grade" name="min_grade">
-    <option value="user" {{if .App}}{{if eq .App.MinGrade "user"}}selected{{end}}{{end}}>user</option>
-    <option value="developer" {{if .App}}{{if eq .App.MinGrade "developer"}}selected{{end}}{{end}}>developer</option>
-    <option value="admin" {{if .App}}{{if eq .App.MinGrade "admin"}}selected{{end}}{{end}}>admin</option>
-  </select>
-  <label><input type="checkbox" name="active" {{if .App}}{{if .App.Active}}checked{{end}}{{end}}> Active</label>
-  <fieldset>
-    <legend>Add capabilities</legend>
+<div class="card" style="max-width:680px">
+  <h2>capabilities</h2>
+  <p class="caption">PATCH /admin/apps/{{.AppID}} · UI는 화이트리스트만 노출 (서버·UI 이중 방어)</p>
+  <form method="post" action="/apps/{{.AppID}}/patch">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <label class="field" for="description">설명</label>
+    <input type="text" id="description" name="description" value="{{if .App}}{{.App.Description}}{{end}}" style="margin-bottom:14px">
+    <label class="field" for="min_grade">최소 등급 (min_grade)</label>
+    <select id="min_grade" name="min_grade" style="margin-bottom:16px">
+      <option value="user" {{if .App}}{{if eq .App.MinGrade "user"}}selected{{end}}{{end}}>user</option>
+      <option value="developer" {{if .App}}{{if eq .App.MinGrade "developer"}}selected{{end}}{{end}}>developer</option>
+      <option value="admin" {{if .App}}{{if eq .App.MinGrade "admin"}}selected{{end}}{{end}}>admin</option>
+    </select>
+    {{$app := .App}}
     {{range .GrantableCapabilities}}
-    <label><input type="checkbox" name="add_capabilities" value="{{.}}"> {{.}}</label>
+    <label class="checkrow"><input type="checkbox" name="capabilities" value="{{.}}" {{if $app}}{{if $app.HasCapability .}}checked{{end}}{{end}}> {{.}}</label>
     {{end}}
-  </fieldset>
-  <fieldset>
-    <legend>Remove capabilities</legend>
-    {{range .GrantableCapabilities}}
-    <label><input type="checkbox" name="remove_capabilities" value="{{.}}"> {{.}}</label>
-    {{end}}
-  </fieldset>
-  <button type="submit">저장</button>
-</form>
 
-<h2>비활성화</h2>
-<form method="post" action="/apps/{{.AppID}}/deactivate">
-  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
-  <button type="submit">비활성화</button>
-</form>
+    <p class="caption" style="margin:16px 0 10px">🔒 관리 capability — UI에서 부여 불가</p>
+    <div class="lockrow"><span>🔒 apps.register</span><span class="deny mono">403 forbidden_capability</span></div>
+    <div class="lockrow"><span>🔒 keys.admin</span><span class="deny mono">403 forbidden_capability</span></div>
+
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button type="submit" class="btn btn-primary">저장</button>
+    </div>
+  </form>
+  <div style="display:flex;gap:10px;margin-top:12px">
+    {{if and .App .App.Active}}
+    <form method="post" action="/apps/{{.AppID}}/deactivate" style="margin:0">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <button type="submit" class="btn btn-outline-danger">앱 비활성화</button>
+    </form>
+    {{else if .App}}
+    <form method="post" action="/apps/{{.AppID}}/patch" style="margin:0">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <input type="hidden" name="set_active" value="1">
+      <button type="submit" class="btn btn-outline">앱 다시 활성화</button>
+    </form>
+    {{end}}
+  </div>
+</div>
 {{end}}
 {{end}}

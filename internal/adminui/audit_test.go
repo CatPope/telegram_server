@@ -45,9 +45,11 @@ func TestAuditPagePassesFiltersAndRendersRows(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
+	// The redesigned table renders stage as a colored badge, condenses the
+	// timestamp to MM-DD HH:MM, and drops the channel column (slide 13).
 	for _, want := range []string{
-		"<td>key_issued</td>", "<td>ci-notifier</td>", "2026-07-06T12:00:00Z",
-		"<td>supergroup</td>", "<td>42</td>", "send_failed", "trace-2",
+		">key_issued</span>", ">ci-notifier<", "07-06 12:00",
+		">42<", "send_failed", "trace-2",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q", want)
