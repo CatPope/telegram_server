@@ -174,6 +174,20 @@
   }
   .key-plain .klabel { display: block; color: #9ca3af; font-size: 12px; margin-bottom: 8px; user-select: none; }
 
+  /* ── Delivery funnel ─────────────────────────────────── */
+  .funnel { padding: 16px 0; border-bottom: 1px solid #f3f4f6; }
+  .funnel:last-child { border-bottom: none; padding-bottom: 4px; }
+  .fhead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+  .frow { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .flabel { width: 84px; color: #6b7280; font-size: 12px; font-family: ui-monospace, monospace; text-align: right; flex-shrink: 0; }
+  .ftrack { flex: 1; background: #f3f4f6; border-radius: 6px; height: 14px; overflow: hidden; }
+  .fbar { height: 100%; border-radius: 6px; }
+  .fbar-received   { background: #93c5fd; }
+  .fbar-validated  { background: #60a5fa; }
+  .fbar-dispatched { background: #3b82f6; }
+  .fbar-delivered  { background: #16a34a; }
+  .fcount { width: 64px; font-size: 12.5px; font-family: ui-monospace, monospace; text-align: right; flex-shrink: 0; }
+
   /* ── Users inline editor ─────────────────────────────── */
   .gradeopts { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }
   .gradeopts input { position: absolute; opacity: 0; pointer-events: none; }
@@ -203,6 +217,7 @@
   <div class="brand"><span class="brand-badge">A</span><span class="brand-name">adminui</span></div>
   <nav class="nav">
     <a href="/" class="{{if eq .Active "dashboard"}}active{{end}}"><span class="dot"></span>대시보드</a>
+    <a href="/delivery" class="{{if eq .Active "delivery"}}active{{end}}"><span class="dot"></span>전달 현황</a>
     <a href="/keys" class="{{if eq .Active "keys"}}active{{end}}"><span class="dot"></span>API 키</a>
     <a href="/apps" class="{{if eq .Active "apps"}}active{{end}}"><span class="dot"></span>앱</a>
     <a href="/users" class="{{if eq .Active "users"}}active{{end}}"><span class="dot"></span>사용자</a>

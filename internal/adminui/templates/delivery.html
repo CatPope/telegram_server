@@ -1,0 +1,79 @@
+{{define "content"}}
+{{$d := .Delivery}}
+
+{{if .DBUnavailable}}
+<div class="banner banner-warn">DB 미연결 — DATABASE_URL이 설정되어야 전달 현황을 집계할 수 있습니다.</div>
+{{else}}
+
+<div class="toolbar">
+  <span class="tlabel">기간</span>
+  <span class="seg">
+    <a href="/delivery?window=7d" class="{{if eq $d.Window "7d"}}on{{end}}">7일</a>
+    <a href="/delivery?window=24h" class="{{if eq $d.Window "24h"}}on{{end}}">24시간</a>
+  </span>
+  <span class="spacer"></span>
+  <span class="tlabel">received → validated → dispatched → delivered</span>
+</div>
+
+<div class="card">
+  <h2>앱별 전달 퍼널</h2>
+  <p class="caption">{{$d.WindowLabel}} · 성공률 = delivered / received</p>
+  {{if $d.Funnels}}
+    {{range $d.Funnels}}
+    <div class="funnel">
+      <div class="fhead">
+        <a class="applink" href="/apps/{{.AppID}}">{{.AppID}}</a>
+        <span class="badge {{if eq .SuccessRate "—"}}badge-gray{{else}}badge-green{{end}}">성공률 {{.SuccessRate}}</span>
+        <span class="spacer" style="flex:1"></span>
+        {{if .Denied}}<span class="badge badge-red badge-mono">denied {{.Denied}}</span>{{end}}
+        {{if .Retried}}<span class="badge badge-purple badge-mono">retried {{.Retried}}</span>{{end}}
+        {{if .Deferred}}<span class="badge badge-purple badge-mono">deferred {{.Deferred}}</span>{{end}}
+      </div>
+      {{range .Bars}}
+      <div class="frow">
+        <span class="flabel">{{.Stage}}</span>
+        <div class="ftrack"><div class="fbar fbar-{{.Stage}}" style="width:{{.WidthPct}}%"></div></div>
+        <span class="fcount">{{.Count}}</span>
+      </div>
+      {{end}}
+    </div>
+    {{end}}
+  {{else}}
+    <p style="color:#6b7280;font-size:14px;margin:0">{{$d.WindowLabel}}간 트래픽이 없습니다</p>
+  {{end}}
+</div>
+
+<div class="card table-card">
+  <div style="padding:20px 20px 0">
+    <h2>최근 실패</h2>
+    <p class="caption">denied · telegram_auth_failed · bot_not_admin · intrusion_* — {{$d.WindowLabel}} 최신 30건</p>
+  </div>
+  {{if $d.FailuresErr}}
+    <div style="padding:0 20px 20px"><div class="banner banner-error" style="margin:0">실패 목록을 불러오지 못했습니다</div></div>
+  {{else if $d.Failures}}
+  <table>
+    <thead><tr>
+      <th>시각</th><th>STAGE</th><th>APP_ID</th><th>수신자</th><th>에러</th><th>TRACE_ID</th>
+    </tr></thead>
+    <tbody>
+      {{range $d.Failures}}
+      <tr>
+        <td class="mono" style="color:#4b5563;font-size:13px;white-space:nowrap">{{.At}}</td>
+        <td><span class="badge badge-mono {{.StageBadge}}">{{.Stage}}</span></td>
+        <td class="mono">{{if .AppID}}{{.AppID}}{{else}}-{{end}}</td>
+        <td class="mono" style="color:#4b5563;font-size:13px">{{.Recipient}}</td>
+        <td>{{if .ErrorCode}}<span class="badge badge-red badge-mono">{{.ErrorCode}}</span>{{end}}</td>
+        <td class="mono" style="color:#4b5563;font-size:13px">{{.TraceID}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{else}}
+    <div style="padding:0 20px 20px">
+      <span class="badge badge-green">✓ 최근 실패가 없습니다</span>
+    </div>
+  {{end}}
+</div>
+
+{{end}}
+{{end}}

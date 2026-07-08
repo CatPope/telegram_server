@@ -55,6 +55,7 @@ func NewServer(cfg Config, store Store, keys KeyStore, auditW audit.Writer) (htt
 	r.Group(func(r chi.Router) {
 		r.Use(sm.Middleware)
 		r.Get("/", s.handleDashboard)
+		r.Get("/delivery", s.handleDeliveryPage)
 		r.With(RequireCSRF(sm)).Post("/logout", s.handleLogout)
 
 		r.Get("/apps", s.handleAppsList)

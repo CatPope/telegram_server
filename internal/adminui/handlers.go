@@ -58,6 +58,9 @@ type pageData struct {
 	// Users page (UXUI redesign).
 	UsersView UsersView
 
+	// Delivery status page.
+	Delivery *DeliveryView
+
 	// Audit page (Phase A4).
 	AuditFilters AuditFilters
 	AuditStages  []string

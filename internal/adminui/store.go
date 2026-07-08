@@ -59,6 +59,12 @@ type Store interface {
 	DashboardStats(ctx context.Context) (DashboardStats, error)
 	RequestSeries(ctx context.Context, days int) ([]AppDayCount, error)
 	ActiveKeyCounts(ctx context.Context) ([]AppKeyCount, error)
+
+	// Delivery status page aggregates. StageCounts feeds the per-app
+	// funnel; RecentFailures lists the newest failure-stage rows within
+	// the same window so the 7d/24h toggle applies to both cards.
+	StageCounts(ctx context.Context, days int) ([]AppStageCount, error)
+	RecentFailures(ctx context.Context, days, limit int) ([]FailureRow, error)
 }
 
 // UserRow is a read-only projection of a users row plus its subscribed
@@ -90,6 +96,27 @@ type AppDayCount struct {
 type AppKeyCount struct {
 	AppID string
 	Count int
+}
+
+// AppStageCount is one funnel cell: how many audit_log events an app
+// produced in a pipeline stage within the delivery page's window.
+type AppStageCount struct {
+	AppID string
+	Stage string
+	Count int
+}
+
+// FailureRow is a failure-stage audit_log row for the delivery page's
+// recent-failures table. Recipient columns stay nullable pointers, matching
+// the audit viewer's treatment of the same columns.
+type FailureRow struct {
+	At              time.Time
+	Stage           string
+	AppID           string
+	RecipientUserID *int64
+	RecipientChatID *int64
+	ErrorCode       string
+	TraceID         string
 }
 
 type pgStore struct {
@@ -243,6 +270,89 @@ func (s *pgStore) RequestSeries(ctx context.Context, days int) ([]AppDayCount, e
 		return nil, fmt.Errorf("adminui: rows: %w", err)
 	}
 	return series, nil
+}
+
+// deliveryFunnelStages is the pipeline the funnel counts. Failure stages
+// are excluded here — they feed RecentFailures instead.
+var deliveryFunnelStages = []string{
+	"received", "validated", "dispatched", "delivered",
+	"denied", "retried", "deferred",
+}
+
+// deliveryFailureStages are the audit stages that mean a message (or its
+// caller) was rejected — what the recent-failures table shows. retried /
+// deferred are in-flight states, not failures, so they stay out.
+var deliveryFailureStages = []string{
+	"denied", "telegram_auth_failed", "bot_not_admin",
+	"intrusion_kick", "intrusion_unmitigated",
+}
+
+func (s *pgStore) StageCounts(ctx context.Context, days int) ([]AppStageCount, error) {
+	// A rolling window (now() - N days) rather than day bucketing, so no
+	// timezone alignment is needed — unlike RequestSeries there is no
+	// day axis to match on the Go side.
+	const q = `
+		SELECT app_id, stage, count(*)
+		FROM audit_log
+		WHERE app_id IS NOT NULL
+		  AND stage = ANY($1)
+		  AND at >= now() - $2 * interval '1 day'
+		GROUP BY app_id, stage
+		ORDER BY app_id, stage`
+
+	ctx, cancel := context.WithTimeout(ctx, storeQueryTimeout)
+	defer cancel()
+	rows, err := s.pool.Query(ctx, q, deliveryFunnelStages, days)
+	if err != nil {
+		return nil, fmt.Errorf("adminui: stage counts: %w", err)
+	}
+	defer rows.Close()
+
+	var counts []AppStageCount
+	for rows.Next() {
+		var c AppStageCount
+		if scanErr := rows.Scan(&c.AppID, &c.Stage, &c.Count); scanErr != nil {
+			return nil, fmt.Errorf("adminui: scan stage count: %w", scanErr)
+		}
+		counts = append(counts, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("adminui: rows: %w", err)
+	}
+	return counts, nil
+}
+
+func (s *pgStore) RecentFailures(ctx context.Context, days, limit int) ([]FailureRow, error) {
+	// ORDER BY id alone: BIGSERIAL is insertion order, so the PK index
+	// satisfies the sort without materializing every failure row.
+	const q = `
+		SELECT at, stage, COALESCE(app_id, ''), recipient_user_id,
+		       recipient_chat_id, COALESCE(error_code, ''), COALESCE(trace_id, '')
+		FROM audit_log
+		WHERE stage = ANY($1) AND at >= now() - $2 * interval '1 day'
+		ORDER BY id DESC
+		LIMIT $3`
+
+	ctx, cancel := context.WithTimeout(ctx, storeQueryTimeout)
+	defer cancel()
+	rows, err := s.pool.Query(ctx, q, deliveryFailureStages, days, limit)
+	if err != nil {
+		return nil, fmt.Errorf("adminui: recent failures: %w", err)
+	}
+	defer rows.Close()
+
+	var failures []FailureRow
+	for rows.Next() {
+		var f FailureRow
+		if scanErr := rows.Scan(&f.At, &f.Stage, &f.AppID, &f.RecipientUserID, &f.RecipientChatID, &f.ErrorCode, &f.TraceID); scanErr != nil {
+			return nil, fmt.Errorf("adminui: scan failure: %w", scanErr)
+		}
+		failures = append(failures, f)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("adminui: rows: %w", err)
+	}
+	return failures, nil
 }
 
 func (s *pgStore) ActiveKeyCounts(ctx context.Context) ([]AppKeyCount, error) {

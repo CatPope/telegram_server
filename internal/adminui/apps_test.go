@@ -13,9 +13,12 @@ import (
 // a real database — Phase A2's plan explicitly abstracts Store behind an
 // interface for this reason.
 type fakeStore struct {
-	apps  map[string]App
-	users []UserRow
-	err   error
+	apps        map[string]App
+	users       []UserRow
+	stageCounts []AppStageCount
+	failures    []FailureRow
+	failuresErr error
+	err         error
 }
 
 func (f *fakeStore) ListApps(context.Context) ([]App, error) {
@@ -60,6 +63,20 @@ func (f *fakeStore) RequestSeries(context.Context, int) ([]AppDayCount, error) {
 
 func (f *fakeStore) ActiveKeyCounts(context.Context) ([]AppKeyCount, error) {
 	return nil, f.err
+}
+
+func (f *fakeStore) StageCounts(context.Context, int) ([]AppStageCount, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.stageCounts, nil
+}
+
+func (f *fakeStore) RecentFailures(context.Context, int, int) ([]FailureRow, error) {
+	if f.failuresErr != nil {
+		return nil, f.failuresErr
+	}
+	return f.failures, nil
 }
 
 // loginSession drives the login flow against handler and returns the
