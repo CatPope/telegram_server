@@ -1,0 +1,54 @@
+{{define "content"}}
+{{$t := .TestSend}}
+
+<div class="card" style="max-width:760px">
+  <h2>테스트 발송</h2>
+  <p class="caption">발급한 API 키가 실제로 동작하는지 검증합니다 — 대상: <span class="mono">{{.ServerURL}}/v1/messages/direct</span></p>
+  <form method="post" action="/test-send">
+    <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+    <div style="margin-bottom:14px">
+      <label class="field" for="api_key">API 키</label>
+      <input type="password" id="api_key" name="api_key" class="mono" required
+             placeholder="tg_..." autocomplete="off">
+      <p class="field-hint">키는 이 요청의 Authorization 헤더로만 전달되며 어디에도 저장·기록되지 않습니다</p>
+    </div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+      <div style="min-width:200px;flex:1">
+        <label class="field" for="app_id">앱 (프로젝트)</label>
+        {{if .Apps}}
+        <select id="app_id" name="app_id" required>
+          {{range .Apps}}{{if .Active}}<option value="{{.ID}}" {{if eq .ID $t.FormAppID}}selected{{end}}>{{.ID}}</option>{{end}}{{end}}
+        </select>
+        {{else}}
+        <input type="text" id="app_id" name="app_id" class="mono" required value="{{$t.FormAppID}}">
+        {{end}}
+      </div>
+      <div style="min-width:200px;flex:1">
+        <label class="field" for="recipient">수신자 telegram_id</label>
+        <input type="text" id="recipient" name="recipient" class="mono" required
+               inputmode="numeric" pattern="[0-9]+" value="{{$t.FormRecipient}}">
+      </div>
+    </div>
+    <div style="margin-bottom:16px">
+      <label class="field" for="text">메시지 텍스트</label>
+      <input type="text" id="text" name="text" required maxlength="1000" value="{{$t.FormText}}">
+    </div>
+    <button type="submit" class="btn btn-primary">발송</button>
+  </form>
+</div>
+
+{{if $t.Result}}
+<div class="card" style="max-width:760px">
+  <h2 style="display:flex;align-items:center;gap:10px">응답
+    <span class="badge badge-mono {{if $t.Result.OK}}badge-green{{else}}badge-red{{end}}">{{$t.Result.Status}}</span>
+  </h2>
+  {{if $t.Result.TraceID}}
+  <p class="caption">trace <span class="mono">{{$t.Result.TraceID}}</span> ·
+    <a class="rowlink" href="/audit?trace_id={{$t.Result.TraceID}}">감사 로그에서 이 호출 보기 →</a></p>
+  {{end}}
+  <code class="key-plain" style="user-select:text;white-space:pre-wrap;font-size:13px">{{$t.Result.Body}}</code>
+  {{if $t.Result.Truncated}}<p class="field-hint">응답이 4KB를 넘어 잘렸습니다</p>{{end}}
+</div>
+{{end}}
+
+{{end}}

@@ -61,6 +61,9 @@ type pageData struct {
 	// Delivery status page.
 	Delivery *DeliveryView
 
+	// Test-send console. Never carries the pasted API key.
+	TestSend *TestSendView
+
 	// Audit page (Phase A4).
 	AuditFilters AuditFilters
 	AuditStages  []string

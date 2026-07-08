@@ -74,6 +74,9 @@ func NewServer(cfg Config, store Store, keys KeyStore, auditW audit.Writer) (htt
 
 		r.Get("/audit", s.handleAuditPage)
 
+		r.Get("/test-send", s.handleTestSendPage)
+		r.With(RequireCSRF(sm)).Post("/test-send", s.handleTestSendSubmit)
+
 		r.Get("/users", s.handleUsersPage)
 		r.With(RequireCSRF(sm)).Post("/users/{id}/grade", s.handleUserGrade)
 		r.With(RequireCSRF(sm)).Post("/users/{id}/subscriptions", s.handleUserSubscribe)

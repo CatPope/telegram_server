@@ -222,6 +222,7 @@
     <a href="/apps" class="{{if eq .Active "apps"}}active{{end}}"><span class="dot"></span>앱</a>
     <a href="/users" class="{{if eq .Active "users"}}active{{end}}"><span class="dot"></span>사용자</a>
     <a href="/audit" class="{{if eq .Active "audit"}}active{{end}}"><span class="dot"></span>로그</a>
+    <a href="/test-send" class="{{if eq .Active "testsend"}}active{{end}}"><span class="dot"></span>테스트 발송</a>
   </nav>
   <div class="side-foot">
     {{if .SessionRemaining}}<div class="session">세션 만료까지 {{.SessionRemaining}}</div>{{end}}
