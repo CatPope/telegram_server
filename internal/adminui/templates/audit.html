@@ -1,5 +1,25 @@
 {{define "content"}}
 <div class="card">
+  <h2 style="font-size:14px">감사 체인 무결성</h2>
+  <p style="color:#6b7280;font-size:13px;margin-top:6px">각 행의 해시가 직전 행의 해시를 포함합니다 — 중간 행을 삽입·삭제·수정하면 이후 체인 전체가 단절됩니다. 가장 최근 행들의 일괄 삭제는 이 검증만으로는 탐지되지 않습니다. 검증은 읽기 전용입니다.</p>
+  {{with .AuditVerify}}
+    {{if .Partial}}
+    <div class="banner banner-warn" style="margin:12px 0 0">{{.Rows}}행까지 정상 — 시간 초과로 중단되었습니다. 다시 실행해 주세요 ({{.Elapsed}})</div>
+    {{else if and .OK (eq .Rows 0)}}
+    <div class="banner banner-warn" style="margin:12px 0 0">감사 로그가 비어 있습니다 — 검증할 체인이 없습니다</div>
+    {{else if .OK}}
+    <div class="banner banner-success" style="margin:12px 0 0">✓ 체인 정상 — {{.Rows}}행 검증됨 · {{.Elapsed}}</div>
+    {{else}}{{with .Break}}
+    <div class="banner banner-error" style="margin:12px 0 0">✗ 체인 단절 — id {{.ID}} · <span class="mono">{{.At}}</span> · {{.Stage}} · {{.Column}} 불일치 (기대 <span class="mono">{{.Expected}}…</span> / 저장 <span class="mono">{{.Stored}}…</span>)</div>
+    {{end}}{{end}}
+  {{end}}
+  <form method="post" action="/audit/verify" style="margin-top:12px">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <button type="submit" class="btn btn-primary">무결성 검증 실행</button>
+  </form>
+</div>
+
+<div class="card">
   <h2 style="font-size:14px">GET /admin/audit/search — 필터 (서버가 단일 검증자)</h2>
   <form method="get" action="/audit" style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-top:12px">
     <div style="min-width:160px">

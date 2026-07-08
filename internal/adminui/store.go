@@ -8,6 +8,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/CatPope/telegram_server/internal/audit"
 )
 
 // storeQueryTimeout bounds each read query so a hung DB can't hold page
@@ -65,6 +67,12 @@ type Store interface {
 	// the same window so the 7d/24h toggle applies to both cards.
 	StageCounts(ctx context.Context, days int) ([]AppStageCount, error)
 	RecentFailures(ctx context.Context, days, limit int) ([]FailureRow, error)
+
+	// VerifyAuditChain walks the audit_log hash chain in id order
+	// (read-only). Unlike the other methods it does NOT apply
+	// storeQueryTimeout — the caller passes its own, larger deadline, and
+	// a deadline error carries the rows verified so far in the result.
+	VerifyAuditChain(ctx context.Context) (audit.VerifyResult, error)
 }
 
 // UserRow is a read-only projection of a users row plus its subscribed
@@ -353,6 +361,38 @@ func (s *pgStore) RecentFailures(ctx context.Context, days, limit int) ([]Failur
 		return nil, fmt.Errorf("adminui: rows: %w", err)
 	}
 	return failures, nil
+}
+
+// verifyChainQuery streams the chain in id order. The canonical payload is
+// recomputed by the same audit_chain_payload the writer hashes with
+// (migrations/0007), so Go only compares hashes and never re-serializes
+// row fields.
+const verifyChainQuery = `
+	SELECT id, at, stage, prev_hash, row_hash,
+	       audit_chain_payload(
+	           at, trace_id, message_id, stage, app_id, capability,
+	           capability_set_ver, endpoint, route_strategy, delivery_channel,
+	           recipient_user_id, recipient_chat_id, error_code, details_json)
+	FROM audit_log
+	ORDER BY id`
+
+func (s *pgStore) VerifyAuditChain(ctx context.Context) (audit.VerifyResult, error) {
+	rows, err := s.pool.Query(ctx, verifyChainQuery)
+	if err != nil {
+		return audit.VerifyResult{}, fmt.Errorf("adminui: verify chain: %w", err)
+	}
+	defer rows.Close()
+
+	return audit.VerifyChain(func() (audit.ChainRow, bool, error) {
+		if !rows.Next() {
+			return audit.ChainRow{}, false, rows.Err()
+		}
+		var r audit.ChainRow
+		if scanErr := rows.Scan(&r.ID, &r.At, &r.Stage, &r.PrevHash, &r.RowHash, &r.Payload); scanErr != nil {
+			return audit.ChainRow{}, false, fmt.Errorf("adminui: scan chain row: %w", scanErr)
+		}
+		return r, true, nil
+	})
 }
 
 func (s *pgStore) ActiveKeyCounts(ctx context.Context) ([]AppKeyCount, error) {

@@ -1,12 +1,22 @@
 package adminui
 
 import (
+	"context"
+	"encoding/hex"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/CatPope/telegram_server/internal/adminui/apiclient"
+	"github.com/CatPope/telegram_server/internal/api/middleware"
 )
+
+// auditVerifyTimeout bounds one chain verification walk. Deliberately
+// larger than storeQueryTimeout: the walk streams the whole table. When it
+// still expires, the page reports how far the chain verified clean and the
+// operator re-runs (each run restarts from the genesis row).
+const auditVerifyTimeout = 30 * time.Second
 
 // auditStages is the stage filter dropdown, matching the server's
 // validAuditStages (internal/api/handlers/admin_audit.go) — anything else
@@ -95,7 +105,12 @@ func (s *Server) handleAuditPage(w http.ResponseWriter, r *http.Request) {
 		AppID:   q.Get("app_id"),
 		Stage:   q.Get("stage"),
 	}
+	s.render(w, "audit.html", s.auditPageData(r, filters))
+}
 
+// auditPageData builds the audit page (filter form + result table) —
+// shared by the GET page and the POST /audit/verify re-render.
+func (s *Server) auditPageData(r *http.Request, filters AuditFilters) pageData {
 	data := s.basePageData(r, "로그", "audit")
 	data.Subtitle = "/admin/audit/search"
 	data.AuditFilters = filters
@@ -111,8 +126,7 @@ func (s *Server) handleAuditPage(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		data.Error = friendlyAPIError(err)
-		s.render(w, "audit.html", data)
-		return
+		return data
 	}
 
 	data.AuditRows = make([]AuditDisplayRow, 0, len(rows))
@@ -129,7 +143,86 @@ func (s *Server) handleAuditPage(w http.ResponseWriter, r *http.Request) {
 			TraceID:         strOrEmpty(row.TraceID),
 		})
 	}
+	return data
+}
+
+// AuditVerifyView is one verification run's outcome, rendered in the
+// integrity card. Hash values are 8-hex-char prefixes — enough to see the
+// mismatch, nothing more.
+type AuditVerifyView struct {
+	OK      bool
+	Partial bool // deadline hit: Rows verified clean, rest unchecked
+	Rows    int64
+	Elapsed string
+	Break   *AuditVerifyBreak
+}
+
+// AuditVerifyBreak is the first broken row, flattened for the template.
+type AuditVerifyBreak struct {
+	ID       int64
+	At       string
+	Stage    string
+	Column   string // "prev_hash" or "row_hash"
+	Expected string
+	Stored   string
+}
+
+// handleAuditVerify walks the audit hash chain (read-only) and re-renders
+// the audit page with the outcome. POST→render directly, like key
+// issuance: the result never travels through a query parameter, so it
+// cannot be forged by crafting a URL.
+func (s *Server) handleAuditVerify(w http.ResponseWriter, r *http.Request) {
+	data := s.auditPageData(r, AuditFilters{})
+	if s.store == nil {
+		data.Error = "무결성 검증은 DB 연결이 필요합니다"
+		s.render(w, "audit.html", data)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), auditVerifyTimeout)
+	defer cancel()
+	start := time.Now()
+	res, err := s.store.VerifyAuditChain(ctx)
+	elapsed := time.Since(start).Round(time.Millisecond)
+
+	timedOut := errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil
+	if err != nil && !timedOut {
+		middleware.Log("error", "adminui_audit_verify_failed", map[string]any{
+			"trace_id": middleware.TraceID(r.Context()),
+			"error":    err.Error(),
+		})
+		data.Error = "무결성 검증 쿼리에 실패했습니다 — DB 상태를 확인하세요"
+		s.render(w, "audit.html", data)
+		return
+	}
+
+	view := &AuditVerifyView{
+		OK:      err == nil && res.OK,
+		Partial: err != nil,
+		Rows:    res.Rows,
+		Elapsed: elapsed.String(),
+	}
+	if res.Break != nil {
+		view.Break = &AuditVerifyBreak{
+			ID:       res.Break.ID,
+			At:       res.Break.At.UTC().Format(time.RFC3339),
+			Stage:    res.Break.Stage,
+			Column:   res.Break.Column,
+			Expected: hashPrefix(res.Break.Expected),
+			Stored:   hashPrefix(res.Break.Stored),
+		}
+	}
+	data.AuditVerify = view
 	s.render(w, "audit.html", data)
+}
+
+// hashPrefix renders the first 8 hex chars of a chain hash for display.
+func hashPrefix(h []byte) string {
+	s := hex.EncodeToString(h)
+	if len(s) > 8 {
+		s = s[:8]
+	}
+	return s
 }
 
 func strOrEmpty(s *string) string {

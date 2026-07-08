@@ -73,6 +73,7 @@ func NewServer(cfg Config, store Store, keys KeyStore, auditW audit.Writer) (htt
 		r.Get("/apps/{id}/keys", s.handleKeysLegacyRedirect)
 
 		r.Get("/audit", s.handleAuditPage)
+		r.With(RequireCSRF(sm)).Post("/audit/verify", s.handleAuditVerify)
 
 		r.Get("/test-send", s.handleTestSendPage)
 		r.With(RequireCSRF(sm)).Post("/test-send", s.handleTestSendSubmit)

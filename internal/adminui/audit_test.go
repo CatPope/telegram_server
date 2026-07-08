@@ -1,10 +1,15 @@
 package adminui
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/CatPope/telegram_server/internal/audit"
 )
 
 func TestAuditPagePassesFiltersAndRendersRows(t *testing.T) {
@@ -128,6 +133,134 @@ func TestAuditPageEscapesRowValues(t *testing.T) {
 	}
 	if !strings.Contains(body, "&lt;script&gt;") {
 		t.Error("expected html/template-escaped app_id in the table")
+	}
+}
+
+// auditVerifyServer builds a logged-in admin UI whose /admin/audit/search
+// target returns an empty result set, so verify tests exercise only the
+// integrity card.
+func auditVerifyServer(t *testing.T, store Store) (http.Handler, []*http.Cookie, func()) {
+	t.Helper()
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[],"limit":50}`))
+	}))
+
+	cfg := testConfig(t, target.URL)
+	handler, err := NewServer(cfg, store, nil, nil)
+	if err != nil {
+		target.Close()
+		t.Fatalf("NewServer: %v", err)
+	}
+	cookies := loginSession(t, handler, cfg)
+	return handler, cookies, target.Close
+}
+
+func TestAuditVerifyRequiresCSRF(t *testing.T) {
+	handler, cookies, closeTarget := auditVerifyServer(t, &fakeStore{})
+	defer closeTarget()
+
+	rec := postForm(t, handler, cookies, "/audit/verify", url.Values{})
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 without csrf_token, got %d", rec.Code)
+	}
+}
+
+func TestAuditVerifyDBUnavailable(t *testing.T) {
+	handler, cookies, closeTarget := auditVerifyServer(t, nil)
+	defer closeTarget()
+
+	token := extractCSRFToken(t, getPage(t, handler, cookies, "/audit").Body.String())
+	rec := postForm(t, handler, cookies, "/audit/verify", url.Values{"csrf_token": {token}})
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "무결성 검증은 DB 연결이 필요합니다") {
+		t.Error("expected DB-unavailable banner")
+	}
+}
+
+func TestAuditVerifyRendersIntactChain(t *testing.T) {
+	store := &fakeStore{verifyResult: audit.VerifyResult{OK: true, Rows: 42}}
+	handler, cookies, closeTarget := auditVerifyServer(t, store)
+	defer closeTarget()
+
+	token := extractCSRFToken(t, getPage(t, handler, cookies, "/audit").Body.String())
+	rec := postForm(t, handler, cookies, "/audit/verify", url.Values{"csrf_token": {token}})
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected direct 200 render, got %d", rec.Code)
+	}
+	if loc := rec.Header().Get("Location"); loc != "" {
+		t.Errorf("verify must render directly, got redirect to %q", loc)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "체인 정상") || !strings.Contains(body, "42행 검증됨") {
+		t.Errorf("expected intact-chain banner with row count, got: %s", body)
+	}
+	// The page below the card still renders (filters + empty table).
+	if !strings.Contains(body, "결과가 없습니다") {
+		t.Error("audit table should render under the verify result")
+	}
+}
+
+func TestAuditVerifyRendersBreak(t *testing.T) {
+	genesis := audit.GenesisHash()
+	stored := audit.ComputeRowHash(genesis, []byte("tampered"))
+	store := &fakeStore{verifyResult: audit.VerifyResult{
+		OK:   false,
+		Rows: 1,
+		Break: &audit.VerifyBreak{
+			ID:       2,
+			At:       time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC),
+			Stage:    "delivered",
+			Column:   "row_hash",
+			Expected: genesis,
+			Stored:   stored,
+		},
+	}}
+	handler, cookies, closeTarget := auditVerifyServer(t, store)
+	defer closeTarget()
+
+	token := extractCSRFToken(t, getPage(t, handler, cookies, "/audit").Body.String())
+	rec := postForm(t, handler, cookies, "/audit/verify", url.Values{"csrf_token": {token}})
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "체인 단절") {
+		t.Fatalf("expected break banner, got: %s", body)
+	}
+	for _, want := range []string{"id 2", "2026-07-08T12:00:00Z", "delivered", "row_hash"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("break banner missing %q", want)
+		}
+	}
+	// Hashes render as 8-hex prefixes, never in full.
+	if !strings.Contains(body, "5bfca120") {
+		t.Error("expected 8-char prefix of the expected hash")
+	}
+	if strings.Contains(body, "5bfca120522968e0") {
+		t.Error("full (or longer) hash must not render")
+	}
+}
+
+func TestAuditVerifyTimeoutReportsPartial(t *testing.T) {
+	store := &fakeStore{
+		verifyResult: audit.VerifyResult{Rows: 120},
+		verifyErr:    context.DeadlineExceeded,
+	}
+	handler, cookies, closeTarget := auditVerifyServer(t, store)
+	defer closeTarget()
+
+	token := extractCSRFToken(t, getPage(t, handler, cookies, "/audit").Body.String())
+	rec := postForm(t, handler, cookies, "/audit/verify", url.Values{"csrf_token": {token}})
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "120행까지 정상") || !strings.Contains(body, "시간 초과") {
+		t.Errorf("expected partial-progress banner, got: %s", body)
+	}
+	if strings.Contains(body, "체인 정상") {
+		t.Error("a timed-out run must not claim the chain is intact")
 	}
 }
 

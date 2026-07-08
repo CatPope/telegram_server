@@ -1,0 +1,10 @@
+BEGIN;
+
+ALTER TABLE audit_log
+    DROP COLUMN prev_hash,
+    DROP COLUMN row_hash;
+
+DROP FUNCTION audit_chain_payload(TIMESTAMPTZ, TEXT, TEXT, TEXT, TEXT, TEXT, BIGINT, TEXT, TEXT, TEXT, BIGINT, BIGINT, TEXT, JSONB);
+DROP FUNCTION audit_chain_field(TEXT);
+
+COMMIT;

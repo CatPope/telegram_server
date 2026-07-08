@@ -60,25 +60,51 @@ jobs:
           FROM generate_series(1, 10) AS g
           ON CONFLICT (telegram_id) DO NOTHING;
 
-          -- 5 apps
-          INSERT INTO apps (name, active, capability_set_version)
+          -- 5 apps (id is a TEXT primary key with no default)
+          INSERT INTO apps (id, name, active)
           SELECT
-            'app_' || g,
-            true,
-            1
+            'restore-app-' || g,
+            'Restore App ' || g,
+            true
           FROM generate_series(1, 5) AS g
           ON CONFLICT DO NOTHING;
 
-          -- 100 audit_log rows
-          INSERT INTO audit_log (app_id, action, trace_id, delivery_channel, capability_set_ver, created_at)
-          SELECT
-            (SELECT id FROM apps ORDER BY id LIMIT 1),
-            'restore_test_fixture',
-            gen_random_uuid(),
-            'direct',
-            1,
-            NOW()
-          FROM generate_series(1, 100) AS g;
+          -- 100 audit_log rows, chained with the same audit_chain_payload()
+          -- the production writer and migration-0007 backfill use — raw
+          -- INSERTs without prev_hash/row_hash violate NOT NULL since 0007.
+          DO $$
+          DECLARE
+            prev  BYTEA;
+            h     BYTEA;
+            ts    TIMESTAMPTZ;
+            tid   TEXT;
+            app   TEXT;
+          BEGIN
+            SELECT id INTO app FROM apps ORDER BY id LIMIT 1;
+            SELECT row_hash INTO prev FROM audit_log ORDER BY id DESC LIMIT 1;
+            IF prev IS NULL THEN
+              prev := sha256(convert_to('telegram_server-audit-genesis-v1', 'UTF8'));
+            END IF;
+            FOR g IN 1..100 LOOP
+              ts  := clock_timestamp();
+              tid := gen_random_uuid()::text;
+              h   := sha256(prev || audit_chain_payload(
+                       ts, tid, NULL, 'received', app, NULL, 1,
+                       NULL, NULL, 'dm', NULL, NULL, NULL,
+                       '{"fixture":"restore-test"}'::jsonb));
+              INSERT INTO audit_log (
+                at, trace_id, message_id, stage, app_id, capability,
+                capability_set_ver, endpoint, route_strategy, delivery_channel,
+                recipient_user_id, recipient_chat_id, error_code, details_json,
+                prev_hash, row_hash)
+              VALUES (
+                ts, tid, NULL, 'received', app, NULL, 1,
+                NULL, NULL, 'dm', NULL, NULL, NULL,
+                '{"fixture":"restore-test"}'::jsonb,
+                prev, h);
+              prev := h;
+            END LOOP;
+          END $$;
           EOF
 
       - name: Dump pg-src

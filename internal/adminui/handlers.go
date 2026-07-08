@@ -64,10 +64,11 @@ type pageData struct {
 	// Test-send console. Never carries the pasted API key.
 	TestSend *TestSendView
 
-	// Audit page (Phase A4).
+	// Audit page (Phase A4). AuditVerify is set only by POST /audit/verify.
 	AuditFilters AuditFilters
 	AuditStages  []string
 	AuditRows    []AuditDisplayRow
+	AuditVerify  *AuditVerifyView
 }
 
 // KeyGroup is the group-by-app view of the global keys table.

@@ -7,18 +7,22 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/CatPope/telegram_server/internal/audit"
 )
 
 // fakeStore is an in-memory Store double so page-handler tests don't need
 // a real database — Phase A2's plan explicitly abstracts Store behind an
 // interface for this reason.
 type fakeStore struct {
-	apps        map[string]App
-	users       []UserRow
-	stageCounts []AppStageCount
-	failures    []FailureRow
-	failuresErr error
-	err         error
+	apps         map[string]App
+	users        []UserRow
+	stageCounts  []AppStageCount
+	failures     []FailureRow
+	failuresErr  error
+	verifyResult audit.VerifyResult
+	verifyErr    error
+	err          error
 }
 
 func (f *fakeStore) ListApps(context.Context) ([]App, error) {
@@ -77,6 +81,10 @@ func (f *fakeStore) RecentFailures(context.Context, int, int) ([]FailureRow, err
 		return nil, f.failuresErr
 	}
 	return f.failures, nil
+}
+
+func (f *fakeStore) VerifyAuditChain(context.Context) (audit.VerifyResult, error) {
+	return f.verifyResult, f.verifyErr
 }
 
 // loginSession drives the login flow against handler and returns the
