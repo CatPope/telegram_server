@@ -37,10 +37,11 @@ type pageData struct {
 	TelegramID            string
 	UnsubAppID            string
 
-	// Dashboard (UXUI redesign).
+	// Dashboard (UXUI redesign → 운영 재구성). Dash carries the 24h flow
+	// sections; the health strip fields survive even with a nil store.
 	Stats        *DashboardStats
 	LineChart    *LineChart
-	BarChart     *BarChart
+	Dash         *DashboardView
 	HealthOK     bool
 	HealthDB     string
 	AdminUptime  string

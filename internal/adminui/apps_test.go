@@ -18,6 +18,8 @@ type fakeStore struct {
 	apps         map[string]App
 	users        []UserRow
 	stageCounts  []AppStageCount
+	kpi          KPICounts
+	kpiErr       error
 	failures     []FailureRow
 	failuresErr  error
 	verifyResult audit.VerifyResult
@@ -65,8 +67,11 @@ func (f *fakeStore) RequestSeries(context.Context, int) ([]AppDayCount, error) {
 	return nil, f.err
 }
 
-func (f *fakeStore) ActiveKeyCounts(context.Context) ([]AppKeyCount, error) {
-	return nil, f.err
+func (f *fakeStore) DeliveryKPICounts(context.Context) (KPICounts, error) {
+	if f.kpiErr != nil {
+		return KPICounts{}, f.kpiErr
+	}
+	return f.kpi, nil
 }
 
 func (f *fakeStore) StageCounts(context.Context, int) ([]AppStageCount, error) {

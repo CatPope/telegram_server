@@ -1,19 +1,70 @@
 {{define "content"}}
 {{if .DBUnavailable}}
-<div class="banner banner-warn">DB 미연결 — 통계와 차트를 표시할 수 없습니다. <code>DATABASE_URL</code>을 설정하세요.</div>
+<div class="banner banner-warn">DB 미연결 — 전달 지표와 차트를 표시할 수 없습니다. <code>DATABASE_URL</code>을 설정하세요.</div>
 {{end}}
 
-{{if .Stats}}
-<div class="stat-grid">
-  <div class="stat-card"><div class="num">{{.Stats.TotalApps}}</div><div class="lab">등록된 앱</div></div>
-  <div class="stat-card"><div class="num">{{.Stats.ActiveApps}}</div><div class="lab">활성 앱</div></div>
-  <div class="stat-card"><div class="num">{{.Stats.ActiveKeys}}</div><div class="lab">활성 API 키</div></div>
-  <div class="stat-card"><div class="num">{{.Stats.Users}}</div><div class="lab">사용자</div></div>
+{{/* 1. 시스템이 살아있나 — 상태 스트립 (nil store여도 렌더) */}}
+<div class="card status-strip">
+  <span class="sitem">
+    <span style="color:{{if .HealthOK}}#16a34a{{else}}#dc2626{{end}}">●</span> API 서버
+    {{if .HealthOK}}<span class="badge badge-green">200 OK</span>{{else}}<span class="badge badge-red">UNREACHABLE</span>{{end}}
+  </span>
+  <span class="sitem"><span class="slabel">DB</span> <span class="mono">{{.HealthDB}}</span></span>
+  <span class="sitem"><span class="slabel">adminui 가동</span> <span class="mono">{{.AdminUptime}}</span></span>
+  <span class="spacer"></span>
+  <span class="sitem mono" style="color:#9ca3af">{{.ServerURL}}</span>
 </div>
 
+{{with .Dash}}
+{{/* 2. 메시지가 흐르고 있나 — 24h 전달 KPI */}}
+{{if .KPIErr}}
+<div class="banner banner-warn">최근 24시간 전달 지표를 불러오지 못했습니다</div>
+{{else}}{{with .KPI}}
+<div class="stat-grid">
+  <div class="stat-card"><div class="num">{{.Received}}</div><div class="lab">수신 · 24h</div></div>
+  <div class="stat-card"><div class="num{{if gt .Delivered 0}} ok{{end}}">{{.Delivered}}</div><div class="lab">전달 완료 · 24h</div></div>
+  <div class="stat-card"><div class="num{{if gt .Failed 0}} bad{{end}}">{{.Failed}}</div><div class="lab">실패 · 24h</div></div>
+  <div class="stat-card"><div class="num">{{.SuccessRate}}</div><div class="lab">전달 성공률 · 24h</div></div>
+</div>
+{{end}}{{end}}
+
+{{/* 3. 뭐가 실패했나 — 최근 실패 상위 5건 */}}
+<div class="card table-card">
+  <div class="card-head pad">
+    <h2 style="margin:0;font-size:15px">최근 실패 <span class="caption" style="display:inline">최근 24시간 · 최대 5건</span></h2>
+    <a class="morelink" href="/delivery?window=24h">전달 현황에서 자세히 →</a>
+  </div>
+  {{if .FailuresErr}}
+  <div class="banner banner-warn" style="margin:0 20px 16px">최근 실패 목록을 불러오지 못했습니다</div>
+  {{else}}
+  <table>
+    <thead>
+      <tr><th>시각</th><th>STAGE</th><th>APP_ID</th><th>RECIPIENT</th><th>ERROR</th><th>TRACE_ID</th></tr>
+    </thead>
+    <tbody>
+    {{range .Failures}}
+    <tr>
+      <td class="mono" style="color:#4b5563;white-space:nowrap">{{.At}}</td>
+      <td><span class="badge badge-mono {{.StageBadge}}">{{.Stage}}</span></td>
+      <td class="mono">{{if .AppID}}{{.AppID}}{{else}}-{{end}}</td>
+      <td class="mono" style="color:#4b5563;font-size:13px">{{.Recipient}}</td>
+      <td>{{if .ErrorCode}}<span class="badge badge-red badge-mono">{{.ErrorCode}}</span>{{end}}</td>
+      <td class="mono" style="color:#4b5563;font-size:13px">{{.TraceID}}</td>
+    </tr>
+    {{else}}
+    <tr><td colspan="6" style="color:#15803d">✓ 최근 24시간 실패 없음</td></tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{end}}
+</div>
+{{end}}
+
+{{/* 4. 추이 + 5. 리소스 현황 */}}
+{{if not .DBUnavailable}}
 <div class="chart-grid">
   <div class="card">
-    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap">
+    <div class="card-head">
       <h2>앱별 요청 수 <span class="caption" style="display:inline">최근 7일 · requests/day</span></h2>
       {{if .LineChart}}
       <div class="legend">
@@ -28,26 +79,18 @@
     {{end}}
   </div>
   <div class="card">
-    <h2>앱별 API 키 수 <span class="caption" style="display:inline">활성 키</span></h2>
-    {{if .BarChart}}
-    {{.BarChart.SVG}}
+    <h2 style="font-size:15px">리소스 현황</h2>
+    {{if .Stats}}
+    <table class="kv">
+      <tr><td><a class="rowlink" href="/apps">등록된 앱</a></td><td>{{.Stats.TotalApps}}</td></tr>
+      <tr><td><a class="rowlink" href="/apps">활성 앱</a></td><td>{{.Stats.ActiveApps}}</td></tr>
+      <tr><td><a class="rowlink" href="/keys">활성 API 키</a></td><td>{{.Stats.ActiveKeys}}</td></tr>
+      <tr><td><a class="rowlink" href="/users">사용자</a></td><td>{{.Stats.Users}}</td></tr>
+    </table>
     {{else}}
-    <p class="caption" style="margin-top:12px">활성 키가 없습니다.</p>
+    <p class="caption" style="margin-top:12px">리소스 통계를 불러오지 못했습니다.</p>
     {{end}}
   </div>
 </div>
 {{end}}
-
-<div class="card" style="max-width:640px">
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-    <h2 style="margin:0"><span style="color:{{if .HealthOK}}#16a34a{{else}}#dc2626{{end}}">●</span> GET /healthz</h2>
-    {{if .HealthOK}}<span class="badge badge-green">200 OK</span>{{else}}<span class="badge badge-red">UNREACHABLE</span>{{end}}
-  </div>
-  <table class="kv">
-    <tr><td>status</td><td>{{if .HealthOK}}ok{{else}}down{{end}}</td></tr>
-    <tr><td>database</td><td>{{.HealthDB}}</td></tr>
-    <tr><td>target</td><td>{{.ServerURL}}</td></tr>
-    <tr><td>adminui uptime</td><td>{{.AdminUptime}}</td></tr>
-  </table>
-</div>
 {{end}}

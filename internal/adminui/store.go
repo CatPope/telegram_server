@@ -57,10 +57,12 @@ type Store interface {
 	// mutation still goes through apiclient.
 	ListUsers(ctx context.Context) ([]UserRow, error)
 
-	// Dashboard aggregates (Phase A5 UI). All read-only.
+	// Dashboard aggregates (Phase A5 UI, 운영 재구성). All read-only.
+	// DeliveryKPICounts is the dashboard's headline row: message flow over
+	// the last 24 hours (rolling window, like StageCounts).
 	DashboardStats(ctx context.Context) (DashboardStats, error)
 	RequestSeries(ctx context.Context, days int) ([]AppDayCount, error)
-	ActiveKeyCounts(ctx context.Context) ([]AppKeyCount, error)
+	DeliveryKPICounts(ctx context.Context) (KPICounts, error)
 
 	// Delivery status page aggregates. StageCounts feeds the per-app
 	// funnel; RecentFailures lists the newest failure-stage rows within
@@ -100,10 +102,13 @@ type AppDayCount struct {
 	Count int
 }
 
-// AppKeyCount is the number of active (non-revoked) keys an app holds.
-type AppKeyCount struct {
-	AppID string
-	Count int
+// KPICounts is the dashboard's last-24h message flow: how many messages
+// entered the pipeline, how many reached Telegram, and how many hit a
+// failure stage (deliveryFailureStages — same set the delivery page uses).
+type KPICounts struct {
+	Received  int
+	Delivered int
+	Failed    int
 }
 
 // AppStageCount is one funnel cell: how many audit_log events an app
@@ -395,32 +400,22 @@ func (s *pgStore) VerifyAuditChain(ctx context.Context) (audit.VerifyResult, err
 	})
 }
 
-func (s *pgStore) ActiveKeyCounts(ctx context.Context) ([]AppKeyCount, error) {
+func (s *pgStore) DeliveryKPICounts(ctx context.Context) (KPICounts, error) {
+	// One pass over the 24h window; FILTER splits the three counters.
+	// Rolling window (no day bucketing), matching StageCounts' 24h mode.
 	const q = `
-		SELECT app_id, count(*)
-		FROM app_keys
-		WHERE revoked_at IS NULL
-		GROUP BY app_id
-		ORDER BY app_id`
+		SELECT count(*) FILTER (WHERE stage = 'received'),
+		       count(*) FILTER (WHERE stage = 'delivered'),
+		       count(*) FILTER (WHERE stage = ANY($1))
+		FROM audit_log
+		WHERE at >= now() - interval '24 hours'`
 
 	ctx, cancel := context.WithTimeout(ctx, storeQueryTimeout)
 	defer cancel()
-	rows, err := s.pool.Query(ctx, q)
-	if err != nil {
-		return nil, fmt.Errorf("adminui: key counts: %w", err)
-	}
-	defer rows.Close()
 
-	var counts []AppKeyCount
-	for rows.Next() {
-		var c AppKeyCount
-		if scanErr := rows.Scan(&c.AppID, &c.Count); scanErr != nil {
-			return nil, fmt.Errorf("adminui: scan key count: %w", scanErr)
-		}
-		counts = append(counts, c)
+	var k KPICounts
+	if err := s.pool.QueryRow(ctx, q, deliveryFailureStages).Scan(&k.Received, &k.Delivered, &k.Failed); err != nil {
+		return KPICounts{}, fmt.Errorf("adminui: delivery kpi: %w", err)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("adminui: rows: %w", err)
-	}
-	return counts, nil
+	return k, nil
 }

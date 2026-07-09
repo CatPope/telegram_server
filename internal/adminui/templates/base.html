@@ -157,7 +157,19 @@
   .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 20px; }
   .stat-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 18px 20px; box-shadow: 0 1px 2px rgba(16,24,40,.04); }
   .stat-card .num { font-size: 30px; font-weight: 800; }
+  .stat-card .num.ok { color: #16a34a; }
+  .stat-card .num.bad { color: #dc2626; }
   .stat-card .lab { color: #6b7280; font-size: 13px; margin-top: 4px; }
+
+  /* ── Dashboard status strip ──────────────────────────── */
+  .status-strip { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; padding: 13px 20px; }
+  .status-strip .sitem { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: #374151; white-space: nowrap; }
+  .status-strip .slabel { color: #6b7280; font-size: 12.5px; }
+  .status-strip .spacer { flex: 1; }
+  .card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .card-head.pad { padding: 16px 20px 12px; }
+  a.morelink { color: #2563eb; text-decoration: none; font-size: 13px; white-space: nowrap; }
+  a.morelink:hover { text-decoration: underline; }
   .chart-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 20px; }
   @media (max-width: 900px) { .chart-grid { grid-template-columns: 1fr; } }
   .legend { display: flex; gap: 14px; font-size: 12.5px; color: #374151; font-family: ui-monospace, monospace; }

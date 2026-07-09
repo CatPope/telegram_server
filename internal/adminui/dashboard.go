@@ -17,12 +17,16 @@ const healthCheckTimeout = 5 * time.Second
 // requestSeriesDays is the dashboard line chart window (slide: "최근 7일").
 const requestSeriesDays = 7
 
+// dashboardFailureLimit bounds the dashboard's recent-failures table — a
+// glanceable headline, not the delivery page's full list.
+const dashboardFailureLimit = 5
+
 // processStart anchors the dashboard's adminui uptime row. The main API
 // exposes no version/uptime on /healthz, so the card shows what this
 // process actually knows.
 var processStart = time.Now()
 
-// chartPalette rotates per app line/bar (slide order: green, blue, orange).
+// chartPalette rotates per app line (slide order: green, blue, orange).
 var chartPalette = []string{"#16a34a", "#2563eb", "#d97706", "#dc2626", "#7c3aed", "#0891b2"}
 
 // LineChart is a server-rendered SVG line chart plus its HTML legend —
@@ -37,14 +41,47 @@ type LegendItem struct {
 	Color string
 }
 
-// BarChart is the per-app active key count column chart.
-type BarChart struct {
-	SVG template.HTML
+// DashboardView carries the dashboard's message-flow sections. Each
+// section degrades independently: a *Err flag renders as a warning rather
+// than a false "all clear" (see the delivery page's FailuresErr rationale).
+type DashboardView struct {
+	KPI         *KPIView
+	KPIErr      bool
+	Failures    []AuditDisplayRow
+	FailuresErr bool
 }
 
+// KPIView is the headline 24h flow row, display-ready.
+type KPIView struct {
+	Received    int
+	Delivered   int
+	Failed      int
+	SuccessRate string // "97%" — "—" when nothing was received
+}
+
+// buildKPIView derives the display row from raw counts. The clamp mirrors
+// buildFunnels: a window edge can catch a delivered event whose received
+// fell outside, and the rate must never read >100%.
+func buildKPIView(c KPICounts) *KPIView {
+	v := &KPIView{Received: c.Received, Delivered: c.Delivered, Failed: c.Failed, SuccessRate: "—"}
+	if c.Received > 0 {
+		rate := 100 * float64(c.Delivered) / float64(c.Received)
+		if rate > 100 {
+			rate = 100
+		}
+		v.SuccessRate = fmt.Sprintf("%.0f%%", rate)
+	}
+	return v
+}
+
+// handleDashboard renders the operator's landing page, ordered by what an
+// operator asks first: is the system alive (status strip) → is anything
+// flowing (24h KPI) → what failed (recent failures) → the 7d trend →
+// resource counts. Every DB section degrades on its own; only the health
+// strip survives a nil store.
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	data := s.basePageData(r, "대시보드", "dashboard")
-	data.Subtitle = "healthz 상태"
+	data.Subtitle = "운영 현황 · 최근 24시간"
 	data.ServerURL = s.cfg.TelegramServerURL
 
 	ctx, cancel := context.WithTimeout(r.Context(), healthCheckTimeout)
@@ -63,14 +100,22 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stats, err := s.store.DashboardStats(r.Context())
-	if err != nil {
-		logDashboardErr(r, "stats", err)
-		data.Error = "대시보드 통계를 불러오지 못했습니다"
-		s.render(w, "dashboard.html", data)
-		return
+	dash := &DashboardView{}
+	data.Dash = dash
+
+	if counts, err := s.store.DeliveryKPICounts(r.Context()); err != nil {
+		logDashboardErr(r, "kpi", err)
+		dash.KPIErr = true
+	} else {
+		dash.KPI = buildKPIView(counts)
 	}
-	data.Stats = &stats
+
+	if failures, err := s.store.RecentFailures(r.Context(), 1, dashboardFailureLimit); err != nil {
+		logDashboardErr(r, "failures", err)
+		dash.FailuresErr = true
+	} else {
+		dash.Failures = failureDisplayRows(failures)
+	}
 
 	if series, err := s.store.RequestSeries(r.Context(), requestSeriesDays); err != nil {
 		logDashboardErr(r, "series", err)
@@ -78,10 +123,11 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		// UTC to match RequestSeries' UTC day bucketing.
 		data.LineChart = buildLineChart(series, requestSeriesDays, time.Now().UTC())
 	}
-	if counts, err := s.store.ActiveKeyCounts(r.Context()); err != nil {
-		logDashboardErr(r, "key_counts", err)
+
+	if stats, err := s.store.DashboardStats(r.Context()); err != nil {
+		logDashboardErr(r, "stats", err)
 	} else {
-		data.BarChart = buildBarChart(counts)
+		data.Stats = &stats
 	}
 
 	s.render(w, "dashboard.html", data)
@@ -191,44 +237,4 @@ func buildLineChart(series []AppDayCount, days int, now time.Time) *LineChart {
 	b.WriteString(`</svg>`)
 
 	return &LineChart{SVG: template.HTML(b.String()), Legend: legend} //nolint:gosec // numeric/escaped content built above
-}
-
-// buildBarChart renders per-app active key counts as an SVG column chart
-// (count above each bar, app id below).
-func buildBarChart(counts []AppKeyCount) *BarChart {
-	if len(counts) == 0 {
-		return nil
-	}
-	maxCount := 1
-	for _, c := range counts {
-		if c.Count > maxCount {
-			maxCount = c.Count
-		}
-	}
-
-	const (
-		h           = 260.0
-		padT, padB  = 28.0, 36.0
-		slotW, barW = 130.0, 56.0
-	)
-	w := slotW * float64(len(counts))
-	plotH := h - padT - padB
-
-	var b strings.Builder
-	fmt.Fprintf(&b, `<svg viewBox="0 0 %.0f %.0f" role="img" aria-label="앱별 API 키 수" xmlns="http://www.w3.org/2000/svg">`, w, h)
-	for i, c := range counts {
-		color := chartPalette[i%len(chartPalette)]
-		cx := slotW*float64(i) + slotW/2
-		barH := plotH * float64(c.Count) / float64(maxCount)
-		if c.Count == 0 {
-			barH = 3 // zero renders as a sliver so the app still shows up
-		}
-		y := padT + plotH - barH
-		fmt.Fprintf(&b, `<rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="4" fill="%s"/>`, cx-barW/2, y, barW, barH, color)
-		fmt.Fprintf(&b, `<text x="%.1f" y="%.1f" font-size="13" font-weight="700" fill="#111827" text-anchor="middle">%d</text>`, cx, y-8, c.Count)
-		fmt.Fprintf(&b, `<text x="%.1f" y="%.1f" font-size="11" fill="#6b7280" text-anchor="middle" font-family="ui-monospace,monospace">%s</text>`,
-			cx, h-12, template.HTMLEscapeString(c.AppID))
-	}
-	b.WriteString(`</svg>`)
-	return &BarChart{SVG: template.HTML(b.String())} //nolint:gosec // numeric/escaped content built above
 }
