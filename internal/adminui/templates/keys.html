@@ -68,7 +68,7 @@
       {{if .RevokedAt}}<span class="badge badge-gray">폐기됨</span>{{else}}<span class="badge badge-green">활성</span>{{end}}
       {{if .Label}}<div class="cell-sub">{{.Label}}</div>{{end}}
     </td>
-    <td style="color:#4b5563">{{.CreatedAt.Format "2006-01-02"}}</td>
+    <td style="color:#4b5563;white-space:nowrap">{{.CreatedAt.Format "2006-01-02"}}</td>
     <td style="text-align:right;white-space:nowrap">
       {{if not .RevokedAt}}
       <a class="rowlink" href="#edit-{{.Prefix}}">수정</a> ·
@@ -95,7 +95,7 @@
       {{if .Label}}<div class="cell-sub">{{.Label}}</div>{{end}}
     </td>
     <td><a class="applink" href="/apps/{{.AppID}}">{{.AppID}}</a></td>
-    <td style="color:#4b5563">{{.CreatedAt.Format "2006-01-02"}}</td>
+    <td style="color:#4b5563;white-space:nowrap">{{.CreatedAt.Format "2006-01-02"}}</td>
     <td style="text-align:right;white-space:nowrap">
       {{if not .RevokedAt}}
       <a class="rowlink" href="#edit-{{.Prefix}}">수정</a> ·

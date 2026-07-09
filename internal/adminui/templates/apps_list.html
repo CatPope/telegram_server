@@ -26,8 +26,8 @@
       <td class="mono">{{.ID}}</td>
       <td>{{if .Active}}<span class="badge badge-green">active</span>{{else}}<span class="badge badge-gray">inactive</span>{{end}}</td>
       <td class="mono" style="color:#4b5563;font-size:13px">{{range $i, $c := .Capabilities}}{{if $i}}, {{end}}{{$c}}{{end}}</td>
-      <td style="color:#4b5563">{{.CreatedAt.Format "2006-01-02"}}</td>
-      <td style="text-align:right"><a class="rowlink" href="/apps/{{.ID}}">상세 →</a></td>
+      <td style="color:#4b5563;white-space:nowrap">{{.CreatedAt.Format "2006-01-02"}}</td>
+      <td style="text-align:right;white-space:nowrap"><a class="rowlink" href="/apps/{{.ID}}">상세 →</a></td>
     </tr>
   {{else}}
     <tr><td colspan="5" style="color:#6b7280">등록된 앱이 없습니다.</td></tr>

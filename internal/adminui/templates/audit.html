@@ -60,19 +60,19 @@
 <table>
   <thead>
     <tr>
-      <th>STAGE</th><th>APP_ID</th><th>ENDPOINT</th><th>RECIPIENT</th><th>ERROR</th><th>TRACE_ID</th><th style="text-align:right">시각</th>
+      <th>시각</th><th>STAGE</th><th>APP_ID</th><th>ENDPOINT</th><th>RECIPIENT</th><th>ERROR</th><th>TRACE_ID</th>
     </tr>
   </thead>
   <tbody>
   {{range .AuditRows}}
   <tr>
+    <td class="mono" style="color:#4b5563;white-space:nowrap">{{.At}}</td>
     <td><span class="badge badge-mono {{.StageBadge}}">{{.Stage}}</span></td>
     <td class="mono">{{if .AppID}}{{.AppID}}{{else}}-{{end}}</td>
-    <td class="mono" style="color:#4b5563;font-size:13px">{{.Endpoint}}</td>
+    <td class="mono" style="color:#4b5563;font-size:13px;white-space:nowrap">{{.Endpoint}}</td>
     <td class="mono" style="color:#4b5563;font-size:13px">{{.Recipient}}</td>
     <td>{{if .ErrorCode}}<span class="badge badge-red badge-mono">{{.ErrorCode}}</span>{{end}}</td>
-    <td class="mono" style="color:#4b5563;font-size:13px">{{.TraceID}}</td>
-    <td class="mono" style="color:#4b5563;text-align:right;white-space:nowrap">{{.At}}</td>
+    <td class="mono" style="color:#4b5563;font-size:13px;white-space:nowrap">{{.TraceID}}</td>
   </tr>
   {{else}}
   <tr><td colspan="7" style="color:#6b7280">결과가 없습니다</td></tr>

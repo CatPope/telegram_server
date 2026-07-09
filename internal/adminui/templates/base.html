@@ -71,7 +71,9 @@
   th, td { padding: 12px 14px; border-bottom: 1px solid #f3f4f6; font-size: 14px; }
   tbody tr:last-child td { border-bottom: none; }
   thead tr { background: #f9fafb; }
-  .table-card { padding: 0; overflow: hidden; }
+  /* overflow-x:auto — nowrap 셀(trace_id 등)이 좁은 화면에서 셀 내부 줄바꿈으로
+     깨지는 대신 카드 안에서 가로 스크롤되도록 */
+  .table-card { padding: 0; overflow-x: auto; overflow-y: hidden; }
   .table-card table { margin: 0; }
   tr.selected td { background: #eff6ff; }
   .cell-sub { color: #6b7280; font-size: 12.5px; margin-top: 2px; }
@@ -171,8 +173,13 @@
   a.morelink { color: #2563eb; text-decoration: none; font-size: 13px; white-space: nowrap; }
   a.morelink:hover { text-decoration: underline; }
   .chart-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 20px; }
-  @media (max-width: 900px) { .chart-grid { grid-template-columns: 1fr; } }
-  .legend { display: flex; gap: 14px; font-size: 12.5px; color: #374151; font-family: ui-monospace, monospace; }
+  /* min-width:0 — 라인차트 범례의 min-content 폭이 그리드 트랙을 밀어내
+     리소스 카드가 짓눌리는 것을 방지 */
+  .chart-grid > .card { min-width: 0; margin-bottom: 0; }
+  .chart-grid .card svg { display: block; width: 100%; height: auto; }
+  @media (max-width: 1100px) { .chart-grid { grid-template-columns: 1fr; } }
+  .legend { display: flex; gap: 6px 14px; flex-wrap: wrap; font-size: 12.5px; color: #374151; font-family: ui-monospace, monospace; }
+  .legend > span { white-space: nowrap; }
   .legend .sw { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
   .kv { width: 100%; border-collapse: collapse; }
   .kv td { padding: 10px 0; border-bottom: 1px solid #f3f4f6; font-size: 14px; }
