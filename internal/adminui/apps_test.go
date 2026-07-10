@@ -20,6 +20,10 @@ type fakeStore struct {
 	stageCounts  []AppStageCount
 	kpi          KPICounts
 	kpiErr       error
+	pipeline     []StageCount
+	pipelineErr  error
+	causes       []ErrorCodeCount
+	causesErr    error
 	failures     []FailureRow
 	failuresErr  error
 	verifyResult audit.VerifyResult
@@ -79,6 +83,20 @@ func (f *fakeStore) StageCounts(context.Context, int) ([]AppStageCount, error) {
 		return nil, f.err
 	}
 	return f.stageCounts, nil
+}
+
+func (f *fakeStore) PipelineStageCounts(context.Context) ([]StageCount, error) {
+	if f.pipelineErr != nil {
+		return nil, f.pipelineErr
+	}
+	return f.pipeline, nil
+}
+
+func (f *fakeStore) FailureCauseCounts(context.Context) ([]ErrorCodeCount, error) {
+	if f.causesErr != nil {
+		return nil, f.causesErr
+	}
+	return f.causes, nil
 }
 
 func (f *fakeStore) RecentFailures(context.Context, int, int) ([]FailureRow, error) {

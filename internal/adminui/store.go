@@ -64,6 +64,14 @@ type Store interface {
 	RequestSeries(ctx context.Context, days int) ([]AppDayCount, error)
 	DeliveryKPICounts(ctx context.Context) (KPICounts, error)
 
+	// Dashboard diagnostics (운영 재구성 v2). Both roll over the same 24h
+	// window as DeliveryKPICounts, so the headline KPI and these two cards
+	// always describe the same slice of time. PipelineStageCounts feeds the
+	// system-wide funnel (어디서 막히나); FailureCauseCounts feeds the
+	// error_code distribution (왜 실패하나).
+	PipelineStageCounts(ctx context.Context) ([]StageCount, error)
+	FailureCauseCounts(ctx context.Context) ([]ErrorCodeCount, error)
+
 	// Delivery status page aggregates. StageCounts feeds the per-app
 	// funnel; RecentFailures lists the newest failure-stage rows within
 	// the same window so the 7d/24h toggle applies to both cards.
@@ -116,6 +124,22 @@ type KPICounts struct {
 type AppStageCount struct {
 	AppID string
 	Stage string
+	Count int
+}
+
+// StageCount is one cell of the dashboard's system-wide funnel: how many
+// audit_log events landed in a pipeline stage across all apps in the 24h
+// window. Unlike AppStageCount there is no app dimension — the dashboard
+// funnel is the whole relay's flow at a glance.
+type StageCount struct {
+	Stage string
+	Count int
+}
+
+// ErrorCodeCount is one bar of the dashboard's failure-cause distribution:
+// how many failures in the 24h window carried a given error_code.
+type ErrorCodeCount struct {
+	Code  string
 	Count int
 }
 
@@ -418,4 +442,71 @@ func (s *pgStore) DeliveryKPICounts(ctx context.Context) (KPICounts, error) {
 		return KPICounts{}, fmt.Errorf("adminui: delivery kpi: %w", err)
 	}
 	return k, nil
+}
+
+func (s *pgStore) PipelineStageCounts(ctx context.Context) ([]StageCount, error) {
+	// System-wide funnel over the 24h window (matching DeliveryKPICounts).
+	// Only the four pipeline stages (funnelStageOrder) are scanned — the
+	// dashboard funnel shows flow, not failures. app_id is NOT filtered:
+	// this is the whole relay's aggregate, unlike the per-app StageCounts.
+	const q = `
+		SELECT stage, count(*)
+		FROM audit_log
+		WHERE stage = ANY($1) AND at >= now() - interval '24 hours'
+		GROUP BY stage`
+
+	ctx, cancel := context.WithTimeout(ctx, storeQueryTimeout)
+	defer cancel()
+	rows, err := s.pool.Query(ctx, q, funnelStageOrder)
+	if err != nil {
+		return nil, fmt.Errorf("adminui: pipeline stage counts: %w", err)
+	}
+	defer rows.Close()
+
+	var counts []StageCount
+	for rows.Next() {
+		var c StageCount
+		if scanErr := rows.Scan(&c.Stage, &c.Count); scanErr != nil {
+			return nil, fmt.Errorf("adminui: scan pipeline stage: %w", scanErr)
+		}
+		counts = append(counts, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("adminui: rows: %w", err)
+	}
+	return counts, nil
+}
+
+func (s *pgStore) FailureCauseCounts(ctx context.Context) ([]ErrorCodeCount, error) {
+	// error_code distribution over the same failure stages RecentFailures
+	// uses, 24h window. NULL/empty error_code collapses to 'unknown' so a
+	// failure without a code still gets a bar. Ordered count desc for a
+	// ranked list; error_code breaks ties for a stable order.
+	const q = `
+		SELECT COALESCE(NULLIF(error_code, ''), 'unknown') AS code, count(*)
+		FROM audit_log
+		WHERE stage = ANY($1) AND at >= now() - interval '24 hours'
+		GROUP BY code
+		ORDER BY count(*) DESC, code`
+
+	ctx, cancel := context.WithTimeout(ctx, storeQueryTimeout)
+	defer cancel()
+	rows, err := s.pool.Query(ctx, q, deliveryFailureStages)
+	if err != nil {
+		return nil, fmt.Errorf("adminui: failure cause counts: %w", err)
+	}
+	defer rows.Close()
+
+	var counts []ErrorCodeCount
+	for rows.Next() {
+		var c ErrorCodeCount
+		if scanErr := rows.Scan(&c.Code, &c.Count); scanErr != nil {
+			return nil, fmt.Errorf("adminui: scan failure cause: %w", scanErr)
+		}
+		counts = append(counts, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("adminui: rows: %w", err)
+	}
+	return counts, nil
 }

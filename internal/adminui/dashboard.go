@@ -47,8 +47,34 @@ type LegendItem struct {
 type DashboardView struct {
 	KPI         *KPIView
 	KPIErr      bool
+	Funnel      *PipelineFunnelView
+	FunnelErr   bool
+	Causes      *FailureCauseView
+	CausesErr   bool
 	Failures    []AuditDisplayRow
 	FailuresErr bool
+}
+
+// PipelineFunnelView is the dashboard's system-wide funnel: the four
+// pipeline stages aggregated across all apps in the 24h window, as bars
+// scaled to the widest stage.
+type PipelineFunnelView struct {
+	Bars []FunnelBar
+}
+
+// FailureCauseView is the 24h failure-cause distribution: error_code
+// counts as ranked bars scaled to the largest cause.
+type FailureCauseView struct {
+	Causes []FailureCauseBar
+}
+
+// FailureCauseBar is one error_code row in the distribution — its width is
+// a percentage of the largest cause (preformatted for the style attr, like
+// FunnelBar.WidthPct).
+type FailureCauseBar struct {
+	Code     string
+	Count    int
+	WidthPct string
 }
 
 // KPIView is the headline 24h flow row, display-ready.
@@ -74,11 +100,74 @@ func buildKPIView(c KPICounts) *KPIView {
 	return v
 }
 
+// barWidthPct scales a count against the widest bar as a CSS width string.
+// A nonzero count floors at 2% so a sliver stays visible; zero renders "0"
+// (no bar). Shared by the funnel and failure-cause cards.
+func barWidthPct(n, max int) string {
+	if n <= 0 {
+		return "0"
+	}
+	pct := 100 * float64(n) / float64(max)
+	if pct < 2 {
+		pct = 2
+	}
+	return fmt.Sprintf("%.1f", pct)
+}
+
+// buildPipelineFunnel pivots system-wide stage counts into the dashboard's
+// aggregate funnel. Returns nil when the window is empty so the card shows
+// a "no traffic" note rather than four zero-width bars.
+func buildPipelineFunnel(counts []StageCount) *PipelineFunnelView {
+	if len(counts) == 0 {
+		return nil
+	}
+	byStage := make(map[string]int, len(counts))
+	for _, c := range counts {
+		byStage[c.Stage] = c.Count
+	}
+	// received is widest in steady state, but a window edge can catch a
+	// later-stage event whose received fell outside — max() keeps widths
+	// ≤ 100% anyway (same rationale as buildFunnels).
+	maxCount := 1
+	for _, stage := range funnelStageOrder {
+		if byStage[stage] > maxCount {
+			maxCount = byStage[stage]
+		}
+	}
+	bars := make([]FunnelBar, 0, len(funnelStageOrder))
+	for _, stage := range funnelStageOrder {
+		n := byStage[stage]
+		bars = append(bars, FunnelBar{Stage: stage, Count: n, WidthPct: barWidthPct(n, maxCount)})
+	}
+	return &PipelineFunnelView{Bars: bars}
+}
+
+// buildFailureCauses turns the error_code distribution into ranked bars.
+// The query already orders by count desc; bars scale to the largest cause.
+// Returns nil on an empty window so the card shows a "no failures" note.
+func buildFailureCauses(counts []ErrorCodeCount) *FailureCauseView {
+	if len(counts) == 0 {
+		return nil
+	}
+	maxCount := 1
+	for _, c := range counts {
+		if c.Count > maxCount {
+			maxCount = c.Count
+		}
+	}
+	bars := make([]FailureCauseBar, 0, len(counts))
+	for _, c := range counts {
+		bars = append(bars, FailureCauseBar{Code: c.Code, Count: c.Count, WidthPct: barWidthPct(c.Count, maxCount)})
+	}
+	return &FailureCauseView{Causes: bars}
+}
+
 // handleDashboard renders the operator's landing page, ordered by what an
 // operator asks first: is the system alive (status strip) → is anything
-// flowing (24h KPI) → what failed (recent failures) → the 7d trend →
-// resource counts. Every DB section degrades on its own; only the health
-// strip survives a nil store.
+// flowing (24h KPI) → where does it stall / why does it fail (funnel +
+// failure-cause) → what failed (recent failures) → the 7d trend → resource
+// counts. Every DB section degrades on its own; only the health strip
+// survives a nil store.
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	data := s.basePageData(r, "대시보드", "dashboard")
 	data.Subtitle = "운영 현황 · 최근 24시간"
@@ -108,6 +197,20 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		dash.KPIErr = true
 	} else {
 		dash.KPI = buildKPIView(counts)
+	}
+
+	if counts, err := s.store.PipelineStageCounts(r.Context()); err != nil {
+		logDashboardErr(r, "funnel", err)
+		dash.FunnelErr = true
+	} else {
+		dash.Funnel = buildPipelineFunnel(counts)
+	}
+
+	if causes, err := s.store.FailureCauseCounts(r.Context()); err != nil {
+		logDashboardErr(r, "causes", err)
+		dash.CausesErr = true
+	} else {
+		dash.Causes = buildFailureCauses(causes)
 	}
 
 	if failures, err := s.store.RecentFailures(r.Context(), 1, dashboardFailureLimit); err != nil {

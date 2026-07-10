@@ -28,7 +28,47 @@
 </div>
 {{end}}{{end}}
 
-{{/* 3. 뭐가 실패했나 — 최근 실패 상위 5건 */}}
+{{/* 3. 어디서 막히나 / 왜 실패하나 — 파이프라인 퍼널 + 실패 원인 분포 */}}
+<div class="diag-grid">
+  <div class="card">
+    <h2 style="font-size:15px">파이프라인 퍼널 <span class="caption" style="display:inline">최근 24시간 · 전체 앱 합산</span></h2>
+    {{if .FunnelErr}}
+    <div class="banner banner-warn" style="margin:12px 0 0">파이프라인 집계를 불러오지 못했습니다</div>
+    {{else if .Funnel}}
+    <div class="barlist">
+      {{range .Funnel.Bars}}
+      <div class="frow">
+        <span class="flabel">{{.Stage}}</span>
+        <div class="ftrack"><div class="fbar fbar-{{.Stage}}" style="width:{{.WidthPct}}%"></div></div>
+        <span class="fcount">{{.Count}}</span>
+      </div>
+      {{end}}
+    </div>
+    {{else}}
+    <p class="caption" style="margin-top:12px">최근 24시간 파이프라인 트래픽이 없습니다.</p>
+    {{end}}
+  </div>
+  <div class="card">
+    <h2 style="font-size:15px">실패 원인 분포 <span class="caption" style="display:inline">최근 24시간 · error_code별</span></h2>
+    {{if .CausesErr}}
+    <div class="banner banner-warn" style="margin:12px 0 0">실패 원인 집계를 불러오지 못했습니다</div>
+    {{else if .Causes}}
+    <div class="barlist">
+      {{range .Causes.Causes}}
+      <div class="crow">
+        <span class="clabel mono" title="{{.Code}}">{{.Code}}</span>
+        <div class="ctrack"><div class="cbar" style="width:{{.WidthPct}}%"></div></div>
+        <span class="ccount">{{.Count}}</span>
+      </div>
+      {{end}}
+    </div>
+    {{else}}
+    <p class="caption" style="margin-top:12px">최근 24시간 집계된 실패가 없습니다.</p>
+    {{end}}
+  </div>
+</div>
+
+{{/* 4. 뭐가 실패했나 — 최근 실패 상위 5건 */}}
 <div class="card table-card">
   <div class="card-head pad">
     <h2 style="margin:0;font-size:15px">최근 실패 <span class="caption" style="display:inline">최근 24시간 · 최대 5건</span></h2>
@@ -60,7 +100,7 @@
 </div>
 {{end}}
 
-{{/* 4. 추이 + 5. 리소스 현황 */}}
+{{/* 5. 추이 + 6. 리소스 현황 */}}
 {{if not .DBUnavailable}}
 <div class="chart-grid">
   <div class="card">
