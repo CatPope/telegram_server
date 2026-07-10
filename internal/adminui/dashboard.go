@@ -17,6 +17,12 @@ const healthCheckTimeout = 5 * time.Second
 // requestSeriesDays is the dashboard line chart window (slide: "최근 7일").
 const requestSeriesDays = 7
 
+// topLineChartApps caps how many apps get their own line; the rest fold into
+// one "기타" line. A busy relay can have 10+ apps, and the earlier
+// one-line-per-app chart was unreadable (every low-volume app pinned to the
+// axis). Ranking by request volume keeps the signal, the fold keeps it legible.
+const topLineChartApps = 4
+
 // dashboardFailureLimit bounds the dashboard's recent-failures table — a
 // glanceable headline, not the delivery page's full list.
 const dashboardFailureLimit = 5
@@ -28,6 +34,10 @@ var processStart = time.Now()
 
 // chartPalette rotates per app line (slide order: green, blue, orange).
 var chartPalette = []string{"#16a34a", "#2563eb", "#d97706", "#dc2626", "#7c3aed", "#0891b2"}
+
+// restLineColor is the muted line for the aggregated "기타" series so it
+// reads as background next to the ranked top apps.
+const restLineColor = "#9ca3af"
 
 // LineChart is a server-rendered SVG line chart plus its HTML legend —
 // built entirely in Go because the CSP allows no chart JS.
@@ -256,10 +266,19 @@ func uptimeString(d time.Duration) string {
 // koreanWeekdays indexes time.Weekday (Sunday = 0).
 var koreanWeekdays = [7]string{"일", "월", "화", "수", "목", "금", "토"}
 
-// buildLineChart renders the requests-per-day series as an inline SVG:
-// one polyline per app over the last `days` days ending at `now`. All text
-// content injected into the SVG is HTML-escaped — app ids come from the DB
-// but defense in depth costs one function call.
+// lineSeries is one drawn line: a label (app id, or "기타 N개") and its
+// per-day counts. rest marks the aggregated series so it gets the muted color.
+type lineSeries struct {
+	label  string
+	counts []int
+	rest   bool
+}
+
+// buildLineChart renders the requests-per-day series as an inline SVG: one
+// polyline for each of the busiest topLineChartApps apps plus one aggregated
+// "기타" line for the rest, over the last `days` days ending at `now`. All
+// text content injected into the SVG is HTML-escaped — app ids come from the
+// DB but defense in depth costs one function call.
 func buildLineChart(series []AppDayCount, days int, now time.Time) *LineChart {
 	if len(series) == 0 {
 		return nil
@@ -276,7 +295,6 @@ func buildLineChart(series []AppDayCount, days int, now time.Time) *LineChart {
 	}
 
 	perApp := make(map[string][]int)
-	maxCount := 1
 	for _, p := range series {
 		idx, ok := dayIndex[p.Day.Format("2006-01-02")]
 		if !ok {
@@ -286,19 +304,23 @@ func buildLineChart(series []AppDayCount, days int, now time.Time) *LineChart {
 			perApp[p.AppID] = make([]int, days)
 		}
 		perApp[p.AppID][idx] = p.Count
-		if p.Count > maxCount {
-			maxCount = p.Count
-		}
 	}
 	if len(perApp) == 0 {
 		return nil
 	}
 
-	appIDs := make([]string, 0, len(perApp))
-	for id := range perApp {
-		appIDs = append(appIDs, id)
+	lines := selectLineSeries(perApp, days)
+
+	// maxCount scales the y-axis to what is actually drawn — the "기타" line
+	// can out-total any single app, so compute it after aggregation.
+	maxCount := 1
+	for _, ln := range lines {
+		for _, c := range ln.counts {
+			if c > maxCount {
+				maxCount = c
+			}
+		}
 	}
-	sort.Strings(appIDs)
 
 	const (
 		w, h                   = 640.0, 260.0
@@ -325,13 +347,16 @@ func buildLineChart(series []AppDayCount, days int, now time.Time) *LineChart {
 		fmt.Fprintf(&b, `<text x="%.1f" y="%.1f" font-size="11" fill="#9ca3af" text-anchor="middle">%s</text>`,
 			xAt(i), h-8, koreanWeekdays[d.Weekday()])
 	}
-	// One polyline per app.
-	legend := make([]LegendItem, 0, len(appIDs))
-	for n, id := range appIDs {
+	// One polyline per selected line (top apps + optional "기타").
+	legend := make([]LegendItem, 0, len(lines))
+	for n, ln := range lines {
 		color := chartPalette[n%len(chartPalette)]
-		legend = append(legend, LegendItem{Label: id, Color: color})
+		if ln.rest {
+			color = restLineColor
+		}
+		legend = append(legend, LegendItem{Label: ln.label, Color: color})
 		pts := make([]string, days)
-		for i, c := range perApp[id] {
+		for i, c := range ln.counts {
 			pts[i] = fmt.Sprintf("%.1f,%.1f", xAt(i), yAt(c))
 		}
 		fmt.Fprintf(&b, `<polyline points="%s" fill="none" stroke="%s" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`,
@@ -340,4 +365,56 @@ func buildLineChart(series []AppDayCount, days int, now time.Time) *LineChart {
 	b.WriteString(`</svg>`)
 
 	return &LineChart{SVG: template.HTML(b.String()), Legend: legend} //nolint:gosec // numeric/escaped content built above
+}
+
+// selectLineSeries ranks apps by total requests over the window and returns
+// the drawn lines in that order: each of the top topLineChartApps apps, then
+// a single "기타 N개" line summing the remainder. When there are few enough
+// apps to show individually (≤ topLineChartApps+1) it returns them all with
+// no fold — a "기타 1개" line would be pointless.
+func selectLineSeries(perApp map[string][]int, days int) []lineSeries {
+	type appTotal struct {
+		id    string
+		total int
+	}
+	totals := make([]appTotal, 0, len(perApp))
+	for id, counts := range perApp {
+		sum := 0
+		for _, c := range counts {
+			sum += c
+		}
+		totals = append(totals, appTotal{id, sum})
+	}
+	// Busiest first; app id breaks ties so the order (and colors) are stable.
+	sort.Slice(totals, func(i, j int) bool {
+		if totals[i].total != totals[j].total {
+			return totals[i].total > totals[j].total
+		}
+		return totals[i].id < totals[j].id
+	})
+
+	if len(totals) <= topLineChartApps+1 {
+		lines := make([]lineSeries, 0, len(totals))
+		for _, at := range totals {
+			lines = append(lines, lineSeries{label: at.id, counts: perApp[at.id]})
+		}
+		return lines
+	}
+
+	lines := make([]lineSeries, 0, topLineChartApps+1)
+	for _, at := range totals[:topLineChartApps] {
+		lines = append(lines, lineSeries{label: at.id, counts: perApp[at.id]})
+	}
+	rest := make([]int, days)
+	for _, at := range totals[topLineChartApps:] {
+		for i, c := range perApp[at.id] {
+			rest[i] += c
+		}
+	}
+	lines = append(lines, lineSeries{
+		label:  fmt.Sprintf("기타 %d개", len(totals)-topLineChartApps),
+		counts: rest,
+		rest:   true,
+	})
+	return lines
 }

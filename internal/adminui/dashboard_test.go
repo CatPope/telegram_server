@@ -71,18 +71,94 @@ func TestBuildLineChartSingleDayNoDivByZero(t *testing.T) {
 	}
 }
 
-func TestBuildLineChartLegendSortedMultiApp(t *testing.T) {
+func TestBuildLineChartLegendRankedByVolume(t *testing.T) {
 	now := day(t, "2026-07-08")
+	// Counts contradict alphabetical order: zeta is busier than alpha, so a
+	// volume ranking must put zeta first — pinning the ranked behavior rather
+	// than passing by coincidence of an alphabetical tie.
 	series := []AppDayCount{
-		{AppID: "zeta", Day: day(t, "2026-07-08"), Count: 1},
-		{AppID: "alpha", Day: day(t, "2026-07-08"), Count: 2},
+		{AppID: "alpha", Day: day(t, "2026-07-08"), Count: 1},
+		{AppID: "zeta", Day: day(t, "2026-07-08"), Count: 2},
 	}
 	chart := buildLineChart(series, 7, now)
 	if chart == nil {
 		t.Fatal("expected a chart")
 	}
-	if len(chart.Legend) != 2 || chart.Legend[0].Label != "alpha" || chart.Legend[1].Label != "zeta" {
-		t.Errorf("legend not sorted by app id: %+v", chart.Legend)
+	if len(chart.Legend) != 2 || chart.Legend[0].Label != "zeta" || chart.Legend[1].Label != "alpha" {
+		t.Errorf("legend not ranked by request volume (busiest first): %+v", chart.Legend)
+	}
+}
+
+func TestSelectLineSeriesShowsAllWhenFew(t *testing.T) {
+	// topLineChartApps+1 apps → no fold, all shown individually.
+	perApp := map[string][]int{
+		"a": {1}, "b": {2}, "c": {3}, "d": {4}, "e": {5},
+	}
+	lines := selectLineSeries(perApp, 1)
+	if len(lines) != 5 {
+		t.Fatalf("expected 5 individual lines (no fold), got %d", len(lines))
+	}
+	for _, ln := range lines {
+		if ln.rest {
+			t.Errorf("no line should be a 기타 fold: %+v", ln)
+		}
+	}
+	// Ranked busiest-first: e(5) … a(1).
+	if lines[0].label != "e" || lines[4].label != "a" {
+		t.Errorf("lines not ranked by total desc: %v", []string{lines[0].label, lines[4].label})
+	}
+}
+
+func TestSelectLineSeriesFoldsRest(t *testing.T) {
+	// 6 apps (> topLineChartApps+1) → top 4 + one "기타 2개" summing the rest.
+	perApp := map[string][]int{
+		"top1": {10, 10}, // 20
+		"top2": {8, 8},   // 16
+		"top3": {6, 6},   // 12
+		"top4": {4, 4},   // 8
+		"low1": {2, 1},   // 3
+		"low2": {1, 1},   // 2  → 기타 = low1+low2 = {3,2}
+	}
+	lines := selectLineSeries(perApp, 2)
+	if len(lines) != topLineChartApps+1 {
+		t.Fatalf("expected %d lines (4 top + 기타), got %d", topLineChartApps+1, len(lines))
+	}
+	rest := lines[len(lines)-1]
+	if !rest.rest {
+		t.Fatalf("last line should be the aggregated fold, got %+v", rest)
+	}
+	if rest.label != "기타 2개" {
+		t.Errorf("fold label = %q, want %q", rest.label, "기타 2개")
+	}
+	if rest.counts[0] != 3 || rest.counts[1] != 2 {
+		t.Errorf("fold should sum the remaining apps per day, got %v want [3 2]", rest.counts)
+	}
+	// Top apps keep their identity and ranking.
+	if lines[0].label != "top1" || lines[3].label != "top4" {
+		t.Errorf("top apps mis-ranked: %v", []string{lines[0].label, lines[3].label})
+	}
+}
+
+func TestBuildLineChartFoldRendersMutedRestLine(t *testing.T) {
+	now := day(t, "2026-07-08")
+	var series []AppDayCount
+	for _, id := range []string{"a1", "a2", "a3", "a4", "a5", "a6"} {
+		series = append(series, AppDayCount{AppID: id, Day: day(t, "2026-07-08"), Count: 1})
+	}
+	chart := buildLineChart(series, 7, now)
+	if chart == nil {
+		t.Fatal("expected a chart")
+	}
+	if len(chart.Legend) != topLineChartApps+1 {
+		t.Fatalf("legend should be top %d + 기타, got %d", topLineChartApps, len(chart.Legend))
+	}
+	last := chart.Legend[len(chart.Legend)-1]
+	if last.Color != restLineColor {
+		t.Errorf("기타 legend should use the muted color %s, got %s", restLineColor, last.Color)
+	}
+	// App ids must still never appear raw in the SVG (only in the escaped legend).
+	if strings.Contains(string(chart.SVG), "a1") {
+		t.Errorf("app id leaked into SVG: %s", chart.SVG)
 	}
 }
 
