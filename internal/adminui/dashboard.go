@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"html/template"
+	"math"
 	"net/http"
 	"sort"
 	"strings"
@@ -61,8 +62,19 @@ type DashboardView struct {
 	FunnelErr   bool
 	Causes      *FailureCauseView
 	CausesErr   bool
+	Latency     *LatencyView
+	LatencyErr  bool
 	Failures    []AuditDisplayRow
 	FailuresErr bool
+}
+
+// LatencyView is the display-ready delivery-latency card: percentiles
+// formatted as human durations plus the sample size they came from.
+type LatencyView struct {
+	Count int
+	P50   string
+	P95   string
+	Max   string
 }
 
 // PipelineFunnelView is the dashboard's system-wide funnel: the four
@@ -172,6 +184,38 @@ func buildFailureCauses(counts []ErrorCodeCount) *FailureCauseView {
 	return &FailureCauseView{Causes: bars}
 }
 
+// formatLatency renders a seconds value as a compact human duration: sub-second
+// as milliseconds, under a minute as fractional seconds, otherwise "Nm Ns".
+// Each band rounds to its own display precision BEFORE the threshold check, so
+// a value that rounds up across a boundary (0.9996s→"1.0s", 59.96s→"1m 0s")
+// is shown in the larger unit rather than as "1000ms" / "60.0s".
+func formatLatency(secs float64) string {
+	if ms := math.Round(secs * 1000); ms < 1000 {
+		return fmt.Sprintf("%dms", int(ms))
+	}
+	if tenths := math.Round(secs * 10); tenths < 600 {
+		return fmt.Sprintf("%.1fs", tenths/10)
+	}
+	total := int(math.Round(secs))
+	return fmt.Sprintf("%dm %ds", total/60, total%60)
+}
+
+// buildLatencyView formats the latency summary for the card. Returns nil when
+// no trace completed in the window; the template then renders an explicit
+// "완료된 전달 없음" note (not a row of "0ms" that would misread as instant
+// delivery, and not a silently absent card).
+func buildLatencyView(s LatencyStats) *LatencyView {
+	if s.Count == 0 {
+		return nil
+	}
+	return &LatencyView{
+		Count: s.Count,
+		P50:   formatLatency(s.P50),
+		P95:   formatLatency(s.P95),
+		Max:   formatLatency(s.Max),
+	}
+}
+
 // handleDashboard renders the operator's landing page, ordered by what an
 // operator asks first: is the system alive (status strip) → is anything
 // flowing (24h KPI) → where does it stall / why does it fail (funnel +
@@ -221,6 +265,13 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		dash.CausesErr = true
 	} else {
 		dash.Causes = buildFailureCauses(causes)
+	}
+
+	if lat, err := s.store.DeliveryLatency(r.Context()); err != nil {
+		logDashboardErr(r, "latency", err)
+		dash.LatencyErr = true
+	} else {
+		dash.Latency = buildLatencyView(lat)
 	}
 
 	if failures, err := s.store.RecentFailures(r.Context(), 1, dashboardFailureLimit); err != nil {

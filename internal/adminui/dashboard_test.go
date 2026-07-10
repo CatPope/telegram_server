@@ -244,6 +244,74 @@ func TestBuildFailureCauses(t *testing.T) {
 	}
 }
 
+func TestFormatLatency(t *testing.T) {
+	cases := []struct {
+		secs float64
+		want string
+	}{
+		{0, "0ms"},
+		{0.004, "4ms"},
+		{0.008, "8ms"},
+		{0.0125, "13ms"}, // rounds
+		{1.5, "1.5s"},
+		{45, "45.0s"},
+		{75, "1m 15s"},
+		{600, "10m 0s"},
+		{0.9996, "1.0s"}, // rounds up across the ms→s boundary, not "1000ms"
+		{59.96, "1m 0s"}, // rounds up across the s→m boundary, not "60.0s"
+		{0.9994, "999ms"}, // stays in ms just below the boundary
+	}
+	for _, tc := range cases {
+		if got := formatLatency(tc.secs); got != tc.want {
+			t.Errorf("formatLatency(%v) = %q, want %q", tc.secs, got, tc.want)
+		}
+	}
+}
+
+func TestBuildLatencyView(t *testing.T) {
+	if got := buildLatencyView(LatencyStats{}); got != nil {
+		t.Fatalf("expected nil view when no trace completed, got %+v", got)
+	}
+	v := buildLatencyView(LatencyStats{Count: 75, P50: 0.004, P95: 0.008, Max: 0.013})
+	if v == nil {
+		t.Fatal("expected a view")
+	}
+	if v.P50 != "4ms" || v.P95 != "8ms" || v.Max != "13ms" || v.Count != 75 {
+		t.Errorf("unexpected latency view: %+v", v)
+	}
+}
+
+func TestDashboardRendersLatency(t *testing.T) {
+	body := dashboardPage(t, &fakeStore{
+		latency: LatencyStats{Count: 75, P50: 0.004, P95: 0.008, Max: 0.013},
+	})
+	for _, want := range []string{"전달 지연", "전달 완료 기준", "p50 (중앙값)", "4ms", "8ms", "완료 표본 수"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("dashboard missing latency %q", want)
+		}
+	}
+}
+
+func TestDashboardLatencyDegradesAndEmpty(t *testing.T) {
+	// Error → banner, never a false "0ms".
+	body := dashboardPage(t, &fakeStore{latencyErr: errors.New("boom")})
+	if !strings.Contains(body, "전달 지연 지표를 불러오지 못했습니다") {
+		t.Error("expected the latency error banner")
+	}
+	if strings.Contains(body, "p50 (중앙값)") {
+		t.Error("latency card must not render when the query failed")
+	}
+	// Empty (Count 0) → an explicit "no completions" note, not a 0ms row and
+	// not a silently absent card (an operator must be able to tell the two apart).
+	empty := dashboardPage(t, &fakeStore{})
+	if strings.Contains(empty, "p50 (중앙값)") {
+		t.Error("latency percentiles must not render for an empty window")
+	}
+	if !strings.Contains(empty, "최근 24시간 완료된 전달이 없습니다") {
+		t.Error("empty window should show the explicit no-completions note")
+	}
+}
+
 // dashboardPage logs in against a handler wired to store and returns the
 // rendered dashboard body.
 func dashboardPage(t *testing.T, store Store) string {

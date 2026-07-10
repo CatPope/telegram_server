@@ -24,6 +24,8 @@ type fakeStore struct {
 	pipelineErr  error
 	causes       []ErrorCodeCount
 	causesErr    error
+	latency      LatencyStats
+	latencyErr   error
 	failures     []FailureRow
 	failuresErr  error
 	verifyResult audit.VerifyResult
@@ -97,6 +99,13 @@ func (f *fakeStore) FailureCauseCounts(context.Context) ([]ErrorCodeCount, error
 		return nil, f.causesErr
 	}
 	return f.causes, nil
+}
+
+func (f *fakeStore) DeliveryLatency(context.Context) (LatencyStats, error) {
+	if f.latencyErr != nil {
+		return LatencyStats{}, f.latencyErr
+	}
+	return f.latency, nil
 }
 
 func (f *fakeStore) RecentFailures(context.Context, int, int) ([]FailureRow, error) {

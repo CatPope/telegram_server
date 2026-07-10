@@ -28,6 +28,27 @@
 </div>
 {{end}}{{end}}
 
+{{/* 2.5 얼마나 빠른가 — 전달 지연 (전달 완료 기준) */}}
+{{if .LatencyErr}}
+<div class="banner banner-warn">전달 지연 지표를 불러오지 못했습니다</div>
+{{else if .Latency}}{{with .Latency}}
+<div class="card latency-card">
+  <h2 style="font-size:15px">전달 지연 <span class="caption" style="display:inline">전달 완료 기준 · 최근 24시간 · received→delivered · 재시도·다중 수신자 포함(마지막 수신자까지)</span></h2>
+  <div class="latency-row">
+    <div class="lat"><div class="lnum">{{.P50}}</div><div class="llab">p50 (중앙값)</div></div>
+    <div class="lat"><div class="lnum">{{.P95}}</div><div class="llab">p95</div></div>
+    <div class="lat"><div class="lnum">{{.Max}}</div><div class="llab">최대</div></div>
+    <div class="lat"><div class="lnum mono">{{.Count}}</div><div class="llab">완료 표본 수</div></div>
+  </div>
+</div>
+{{end}}
+{{else}}
+<div class="card latency-card">
+  <h2 style="font-size:15px">전달 지연 <span class="caption" style="display:inline">전달 완료 기준 · 최근 24시간</span></h2>
+  <p class="caption" style="margin-top:12px">최근 24시간 완료된 전달이 없습니다.</p>
+</div>
+{{end}}
+
 {{/* 3. 어디서 막히나 / 왜 실패하나 — 파이프라인 퍼널 + 실패 원인 분포 */}}
 <div class="diag-grid">
   <div class="card">

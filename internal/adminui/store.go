@@ -72,6 +72,13 @@ type Store interface {
 	PipelineStageCounts(ctx context.Context) ([]StageCount, error)
 	FailureCauseCounts(ctx context.Context) ([]ErrorCodeCount, error)
 
+	// DeliveryLatency is the received→delivered elapsed-time summary over
+	// messages delivered in the last 24h (얼마나 빠른가). Anchored on the
+	// delivered event, not received, so a message received before the window
+	// but delivered inside it still counts — see the query for the boundary,
+	// retry, and population semantics.
+	DeliveryLatency(ctx context.Context) (LatencyStats, error)
+
 	// Delivery status page aggregates. StageCounts feeds the per-app
 	// funnel; RecentFailures lists the newest failure-stage rows within
 	// the same window so the 7d/24h toggle applies to both cards.
@@ -141,6 +148,18 @@ type StageCount struct {
 type ErrorCodeCount struct {
 	Code  string
 	Count int
+}
+
+// LatencyStats summarizes received→delivered elapsed time (in seconds) over
+// the traces delivered in the last 24h. Count is the sample size — the
+// number of completed traces the percentiles are computed from, NOT all
+// traffic (in-flight and failed traces have no delivered event and are
+// excluded). Zero Count means nothing completed in the window.
+type LatencyStats struct {
+	Count int
+	P50   float64 // seconds
+	P95   float64 // seconds
+	Max   float64 // seconds
 }
 
 // FailureRow is a failure-stage audit_log row for the delivery page's
@@ -509,4 +528,58 @@ func (s *pgStore) FailureCauseCounts(ctx context.Context) ([]ErrorCodeCount, err
 		return nil, fmt.Errorf("adminui: rows: %w", err)
 	}
 	return counts, nil
+}
+
+func (s *pgStore) DeliveryLatency(ctx context.Context) (LatencyStats, error) {
+	// Elapsed time from a trace's first 'received' to its last 'delivered'.
+	// Design decisions (each a correctness call, not a cost one):
+	//   - Anchor on delivered in the 24h window; look back 25h for received
+	//     (1h slack) so a message whose received fell just outside the 24h
+	//     window is still paired — real relay latency is far under an hour,
+	//     so the slack captures every boundary case without an unbounded
+	//     full-history scan of received rows (both windows stay index-backed).
+	//   - min(received)→max(delivered): caller-visible completion. There is
+	//     one received per trace; multiple delivered rows come from
+	//     multi-recipient fan-out (one delivered per recipient), so max is
+	//     the time until the LAST recipient succeeded. Rate-limit retries
+	//     happen before the delivered write, so they're already included.
+	//   - Population is delivered traces only. In-flight and failed traces
+	//     have no delivered event and are excluded — the percentiles describe
+	//     successful deliveries, a different denominator than the KPI counts.
+	//   - delivered_at >= received_at guards against a clock-skewed pair
+	//     producing a negative latency.
+	const q = `
+		WITH deliv AS (
+			SELECT trace_id, max(at) AS delivered_at
+			FROM audit_log
+			WHERE stage = 'delivered' AND trace_id IS NOT NULL
+			  AND at >= now() - interval '24 hours'
+			GROUP BY trace_id
+		),
+		recv AS (
+			SELECT trace_id, min(at) AS received_at
+			FROM audit_log
+			WHERE stage = 'received' AND trace_id IS NOT NULL
+			  AND at >= now() - interval '25 hours'
+			GROUP BY trace_id
+		),
+		lat AS (
+			SELECT EXTRACT(EPOCH FROM (d.delivered_at - r.received_at)) AS secs
+			FROM deliv d JOIN recv r USING (trace_id)
+			WHERE d.delivered_at >= r.received_at
+		)
+		SELECT count(*),
+		       COALESCE(percentile_cont(0.5)  WITHIN GROUP (ORDER BY secs), 0),
+		       COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY secs), 0),
+		       COALESCE(max(secs), 0)
+		FROM lat`
+
+	ctx, cancel := context.WithTimeout(ctx, storeQueryTimeout)
+	defer cancel()
+
+	var st LatencyStats
+	if err := s.pool.QueryRow(ctx, q).Scan(&st.Count, &st.P50, &st.P95, &st.Max); err != nil {
+		return LatencyStats{}, fmt.Errorf("adminui: delivery latency: %w", err)
+	}
+	return st, nil
 }

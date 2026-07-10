@@ -6,3 +6,4 @@
 |------|--------|-----------|------|
 | 2026-07-10 | [dashboard-viz](2026-07-10-dashboard-viz.md) | `d42a241` 대시보드 파이프라인 퍼널 + 실패 원인 분포 | ✅ green |
 | 2026-07-10 | [line-chart-topn](2026-07-10-line-chart-topn.md) | 라인차트 상위 N + 기타 개선 (③) | ✅ green |
+| 2026-07-10 | [delivery-latency](2026-07-10-delivery-latency.md) | 전달 지연 p50/p95 카드 (④) | ✅ green |
