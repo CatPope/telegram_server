@@ -89,6 +89,19 @@ func (h *AdminAuditHandler) Search(w http.ResponseWriter, r *http.Request) {
 		until = &t
 	}
 
+	// Keyset pagination cursor: return only rows with id < before_id.
+	// id is BIGSERIAL (insertion order ≈ at order), so the PK index
+	// satisfies both the cursor predicate and the sort.
+	var beforeID int64
+	if b := q.Get("before_id"); b != "" {
+		v, err := strconv.ParseInt(b, 10, 64)
+		if err != nil || v <= 0 {
+			flow.deny("invalid_before_id", http.StatusBadRequest)
+			return
+		}
+		beforeID = v
+	}
+
 	traceID := q.Get("trace_id")
 	filterAppID := q.Get("app_id")
 	stage := q.Get("stage")
@@ -128,12 +141,19 @@ func (h *AdminAuditHandler) Search(w http.ResponseWriter, r *http.Request) {
 	if until != nil {
 		addLte("at", *until)
 	}
+	if beforeID > 0 {
+		args = append(args, beforeID)
+		where += " AND id < $" + strconv.Itoa(len(args))
+	}
 
 	args = append(args, limit)
+	// ORDER BY id DESC (not at DESC): id is BIGSERIAL insertion order —
+	// effectively the same ordering as at — and lets the before_id keyset
+	// walk pages off the PK index without a sort.
 	sqlQuery := `SELECT id, at, trace_id, message_id, stage, app_id, capability,
 		capability_set_ver, endpoint, route_strategy, delivery_channel,
 		recipient_user_id, recipient_chat_id, error_code, details_json
-	FROM audit_log ` + where + ` ORDER BY at DESC LIMIT $` + strconv.Itoa(len(args))
+	FROM audit_log ` + where + ` ORDER BY id DESC LIMIT $` + strconv.Itoa(len(args))
 
 	rows, err := h.Pool.Query(r.Context(), sqlQuery, args...)
 	if err != nil {
@@ -165,13 +185,14 @@ func (h *AdminAuditHandler) Search(w http.ResponseWriter, r *http.Request) {
 	}
 
 	flow.succeed(map[string]any{
-		"result_count":    len(results),
-		"requested_limit": limit,
-		"filter_trace_id": traceID != "",
-		"filter_app_id":   filterAppID,
-		"filter_stage":    stage,
-		"filter_since":    since != nil,
-		"filter_until":    until != nil,
+		"result_count":     len(results),
+		"requested_limit":  limit,
+		"filter_trace_id":  traceID != "",
+		"filter_app_id":    filterAppID,
+		"filter_stage":     stage,
+		"filter_since":     since != nil,
+		"filter_until":     until != nil,
+		"filter_before_id": beforeID,
 	})
 
 	writeJSON(w, http.StatusOK, map[string]any{

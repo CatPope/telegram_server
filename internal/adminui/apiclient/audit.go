@@ -22,6 +22,9 @@ type AuditSearchParams struct {
 	TraceID string
 	AppID   string
 	Stage   string
+	// BeforeID is the keyset-pagination cursor: only rows with id <
+	// BeforeID come back ("" = first page).
+	BeforeID string
 }
 
 // AuditRow mirrors one element of the search response's results[] array
@@ -59,6 +62,7 @@ func (c *Client) SearchAudit(ctx context.Context, p AuditSearchParams) ([]AuditR
 	set("trace_id", p.TraceID)
 	set("app_id", p.AppID)
 	set("stage", p.Stage)
+	set("before_id", p.BeforeID)
 
 	path := "/admin/audit/search"
 	if len(q) > 0 {

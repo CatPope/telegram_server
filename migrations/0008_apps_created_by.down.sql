@@ -1,0 +1,3 @@
+BEGIN;
+ALTER TABLE apps DROP COLUMN created_by;
+COMMIT;

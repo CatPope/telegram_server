@@ -103,10 +103,17 @@ func (h *AdminAppsHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
+	// created_by records who registered the app — the authenticated
+	// requester's app id ('' if the identity is somehow absent).
+	createdBy := ""
+	if requester, ok := auth.RequesterFrom(ctx); ok {
+		createdBy = requester.AppID
+	}
+
 	_, err = tx.Exec(ctx,
-		`INSERT INTO apps (id, name, description, min_grade, active, capability_set_version)
-		 VALUES ($1, $2, $3, COALESCE(NULLIF($4,''),'user'), true, 1)`,
-		req.ID, req.Name, req.Description, req.MinGrade,
+		`INSERT INTO apps (id, name, description, min_grade, active, capability_set_version, created_by)
+		 VALUES ($1, $2, $3, COALESCE(NULLIF($4,''),'user'), true, 1, $5)`,
+		req.ID, req.Name, req.Description, req.MinGrade, createdBy,
 	)
 	if err != nil {
 		flow.deny("app_already_exists", http.StatusConflict)
@@ -128,7 +135,7 @@ func (h *AdminAppsHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	flow.succeed(map[string]any{"created_app_id": req.ID})
+	flow.succeed(map[string]any{"created_app_id": req.ID, "created_by": createdBy})
 	writeJSON(w, http.StatusCreated, map[string]any{"id": req.ID})
 }
 
