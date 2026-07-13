@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"net/url"
 	"slices"
 	"sort"
 	"strconv"
@@ -37,11 +38,14 @@ var deliveryWindows = []struct {
 const trendPointCap = 90
 
 // DeliveryView is the 전달 현황 page state: the period/app/stage/error
-// filters, the filtered trend chart, per-app funnels, and the failures table.
+// filters, the 화면 toggle, and the selected 화면's data (trend chart,
+// per-app funnels, or the failures table — one at a time).
 type DeliveryView struct {
 	Window       string
 	WindowLabel  string
 	Windows      []DeliveryWindowOption
+	View         string
+	Views        []DeliveryViewOption
 	AppFilter    string
 	StageFilter  string
 	ErrorFilter  string
@@ -52,6 +56,7 @@ type DeliveryView struct {
 	Trend        *LineChart
 	TrendErr     bool
 	Funnels      []AppFunnel
+	FunnelsErr   bool
 	Failures     []AuditDisplayRow
 	FailuresErr  bool
 }
@@ -60,6 +65,38 @@ type DeliveryView struct {
 type DeliveryWindowOption struct {
 	Key   string
 	Label string
+	On    bool
+}
+
+// deliveryViews is the 화면 toggle (요청사항: API 키 화면과 같은 .seg
+// 그룹으로 최근 실패 / 전달 추이 / 퍼널을 각각 다른 화면으로). The first
+// entry is the default.
+var deliveryViews = []struct {
+	Key   string
+	Label string
+}{
+	{"failures", "최근 실패"},
+	{"trend", "전달 추이"},
+	{"funnel", "퍼널"},
+}
+
+// resolveDeliveryView maps ?view= to a toggle entry, falling back to the
+// default (최근 실패) on anything unknown.
+func resolveDeliveryView(key string) string {
+	for _, v := range deliveryViews {
+		if v.Key == key {
+			return v.Key
+		}
+	}
+	return deliveryViews[0].Key
+}
+
+// DeliveryViewOption is one rendered 화면 toggle segment. URL carries the
+// active filters so switching screens never resets the operator's query.
+type DeliveryViewOption struct {
+	Key   string
+	Label string
+	URL   string
 	On    bool
 }
 
@@ -117,13 +154,14 @@ func resolveDeliveryWindow(key string) (string, string, int) {
 	return d.Key, "최근 " + d.Label, d.Days
 }
 
-// handleDeliveryPage renders 전달 현황: 기간/앱/유형/에러 필터 (요청사항),
-// the filtered per-day trend chart, per-app funnel aggregates, and the
-// newest matching failures — all read directly from audit_log via Store
-// (the /admin API exposes search but no aggregation).
+// handleDeliveryPage renders 전달 현황: 기간/앱/유형/에러 필터 (요청사항)
+// plus the 화면 toggle — 최근 실패(기본) / 전달 추이 / 퍼널 are separate
+// screens (요청사항: API 키 화면과 같은 .seg 그룹), all read directly from
+// audit_log via Store (the /admin API exposes search but no aggregation).
 func (s *Server) handleDeliveryPage(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	window, label, days := resolveDeliveryWindow(q.Get("window"))
+	view := resolveDeliveryView(q.Get("view"))
 
 	stageOpts := deliveryStageOptions()
 	appF := q.Get("app")
@@ -136,6 +174,7 @@ func (s *Server) handleDeliveryPage(w http.ResponseWriter, r *http.Request) {
 	d := &DeliveryView{
 		Window:       window,
 		WindowLabel:  label,
+		View:         view,
 		AppFilter:    appF,
 		StageFilter:  stageF,
 		ErrorFilter:  errF,
@@ -144,6 +183,25 @@ func (s *Server) handleDeliveryPage(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, o := range deliveryWindows {
 		d.Windows = append(d.Windows, DeliveryWindowOption{Key: o.Key, Label: o.Label, On: o.Key == window})
+	}
+	// Toggle links carry the active filters so switching screens never
+	// resets the operator's query.
+	for _, v := range deliveryViews {
+		vals := url.Values{}
+		vals.Set("view", v.Key)
+		vals.Set("window", window)
+		if appF != "" {
+			vals.Set("app", appF)
+		}
+		if stageF != "" {
+			vals.Set("stage", stageF)
+		}
+		if errF != "" {
+			vals.Set("error", errF)
+		}
+		d.Views = append(d.Views, DeliveryViewOption{
+			Key: v.Key, Label: v.Label, URL: "/delivery?" + vals.Encode(), On: v.Key == view,
+		})
 	}
 
 	data := s.basePageData(r, "전달 현황", "delivery")
@@ -183,35 +241,33 @@ func (s *Server) handleDeliveryPage(w http.ResponseWriter, r *http.Request) {
 		sort.Strings(d.ErrorOptions)
 	}
 
-	counts, err := s.store.StageCounts(r.Context(), days, appF)
-	if err != nil {
-		logDeliveryErr(r, "counts", err)
-		data.Error = "전달 현황 집계를 불러오지 못했습니다"
-		// Without a working aggregate query the other cards must not claim
-		// "no data" — mark them errored too.
-		d.TrendErr = true
-		d.FailuresErr = true
-		s.render(w, "delivery.html", data)
-		return
-	}
-	d.Funnels = buildFunnels(counts)
-
-	// Trend and failures degrade independently — the funnel is still
-	// useful if only one of these queries fails.
-	if daily, err := s.store.DeliveryDailyCounts(r.Context(), TrendFilter{Days: days, AppID: appF, Stage: stageF, ErrorCode: errF}); err != nil {
-		logDeliveryErr(r, "trend", err)
-		d.TrendErr = true
-	} else {
-		d.Trend = buildTrendChart(daily, days, stageF, time.Now().UTC())
-	}
-
-	if failures, err := s.store.RecentFailures(r.Context(), FailureFilter{
-		Days: days, Limit: recentFailureLimit, AppID: appF, Stage: stageF, ErrorCode: errF,
-	}); err != nil {
-		logDeliveryErr(r, "failures", err)
-		d.FailuresErr = true
-	} else {
-		d.Failures = failureDisplayRows(failures)
+	// Only the selected 화면's aggregate runs — the other cards aren't
+	// rendered, and a 365-day scan for an invisible chart is not free.
+	// Each screen keeps its own error→banner / empty→note / data branch.
+	switch view {
+	case "funnel":
+		if counts, err := s.store.StageCounts(r.Context(), days, appF); err != nil {
+			logDeliveryErr(r, "counts", err)
+			d.FunnelsErr = true
+		} else {
+			d.Funnels = buildFunnels(counts)
+		}
+	case "trend":
+		if daily, err := s.store.DeliveryDailyCounts(r.Context(), TrendFilter{Days: days, AppID: appF, Stage: stageF, ErrorCode: errF}); err != nil {
+			logDeliveryErr(r, "trend", err)
+			d.TrendErr = true
+		} else {
+			d.Trend = buildTrendChart(daily, days, stageF, time.Now().UTC())
+		}
+	default: // failures
+		if failures, err := s.store.RecentFailures(r.Context(), FailureFilter{
+			Days: days, Limit: recentFailureLimit, AppID: appF, Stage: stageF, ErrorCode: errF,
+		}); err != nil {
+			logDeliveryErr(r, "failures", err)
+			d.FailuresErr = true
+		} else {
+			d.Failures = failureDisplayRows(failures)
+		}
 	}
 
 	s.render(w, "delivery.html", data)

@@ -10,3 +10,4 @@
 | 2026-07-10 | [full-width-layout](2026-07-10-full-width-layout.md) | 전 페이지 full-width 전환(폼 제외) | ✅ green |
 | 2026-07-13 | [adminui-request-batch](2026-07-13-adminui-request-batch.md) | 요청사항 일괄: 대시보드 재구성·전달현황 필터·앱 삭제·로그 필터 UI·purge API | ✅ green |
 | 2026-07-13 | [mocktelegram-unbounded-growth](2026-07-13-mocktelegram-unbounded-growth.md) | mocktelegram 27GB 근본 원인: 무제한 기록 유계화 + getUpdates long-poll + 로그 로테이션 | ✅ green |
+| 2026-07-14 | [adminui-r2](2026-07-14-adminui-r2.md) | R2: 그래프 직관화(SLO 핀·앱 툴팁·파이 0건 초록)·전달현황 화면 토글·등록자 컬럼·로그 페이지네이션 | ✅ green |

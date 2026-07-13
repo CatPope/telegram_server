@@ -72,11 +72,15 @@ type pageData struct {
 	// Audit page (Phase A4). AuditVerify is set only by POST /audit/verify.
 	// AuditAppOptions empty → the template falls back to a free-text app_id
 	// input (nil store or failed lookup).
+	// AuditNextURL/AuditFirstURL are the keyset-pagination links ("" hides
+	// the control): next cursors on the last displayed row's id.
 	AuditFilters    AuditFilters
 	AuditStages     []string
 	AuditLimits     []string
 	AuditAppOptions []string
 	AuditRows       []AuditDisplayRow
+	AuditNextURL    string
+	AuditFirstURL   string
 	AuditVerify     *AuditVerifyView
 }
 

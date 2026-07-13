@@ -27,6 +27,7 @@ type App struct {
 	Active       bool
 	Capabilities []string
 	CreatedAt    time.Time
+	CreatedBy    string // registering requester's app id; "" for pre-0008 rows
 }
 
 // HasCapability reports whether the app currently holds a capability —
@@ -83,9 +84,10 @@ type Store interface {
 	DeliveryLatency(ctx context.Context) (LatencyStats, error)
 
 	// LatencySamples returns the individual received→delivered latencies
-	// (seconds) behind DeliveryLatency, newest delivery first, capped at
-	// limit — the dashboard's strip plot draws each completed trace as a dot.
-	LatencySamples(ctx context.Context, limit int) ([]float64, error)
+	// behind DeliveryLatency (with the delivering app), newest delivery
+	// first, capped at limit — the dashboard's strip plot draws each
+	// completed trace as a dot whose tooltip names the app.
+	LatencySamples(ctx context.Context, limit int) ([]LatencySample, error)
 
 	// Delivery status page aggregates. StageCounts feeds the per-app
 	// funnel (appID "" = all apps); RecentFailures lists the newest
@@ -210,6 +212,14 @@ type LatencyStats struct {
 	Max   float64 // seconds
 }
 
+// LatencySample is one completed trace on the dashboard strip plot: its
+// received→delivered elapsed time and the app that delivered it ("" when
+// the delivered row carried no app_id).
+type LatencySample struct {
+	AppID string
+	Secs  float64
+}
+
 // FailureRow is a failure-stage audit_log row for the delivery page's
 // recent-failures table. Recipient columns stay nullable pointers, matching
 // the audit viewer's treatment of the same columns.
@@ -241,10 +251,10 @@ func NewStore(pool *pgxpool.Pool) Store {
 const listAppsQuery = `
 	SELECT a.id, a.name, a.description, a.min_grade, a.active,
 	       COALESCE(array_agg(c.capability) FILTER (WHERE c.capability IS NOT NULL), '{}'),
-	       a.created_at
+	       a.created_at, a.created_by
 	FROM apps a
 	LEFT JOIN app_capabilities c ON c.app_id = a.id
-	GROUP BY a.id, a.name, a.description, a.min_grade, a.active, a.created_at
+	GROUP BY a.id, a.name, a.description, a.min_grade, a.active, a.created_at, a.created_by
 	ORDER BY a.id`
 
 func (s *pgStore) ListApps(ctx context.Context) ([]App, error) {
@@ -259,7 +269,7 @@ func (s *pgStore) ListApps(ctx context.Context) ([]App, error) {
 	var apps []App
 	for rows.Next() {
 		var a App
-		if scanErr := rows.Scan(&a.ID, &a.Name, &a.Description, &a.MinGrade, &a.Active, &a.Capabilities, &a.CreatedAt); scanErr != nil {
+		if scanErr := rows.Scan(&a.ID, &a.Name, &a.Description, &a.MinGrade, &a.Active, &a.Capabilities, &a.CreatedAt, &a.CreatedBy); scanErr != nil {
 			return nil, fmt.Errorf("adminui: scan app: %w", scanErr)
 		}
 		apps = append(apps, a)
@@ -274,17 +284,17 @@ func (s *pgStore) GetApp(ctx context.Context, id string) (App, error) {
 	const q = `
 		SELECT a.id, a.name, a.description, a.min_grade, a.active,
 		       COALESCE(array_agg(c.capability) FILTER (WHERE c.capability IS NOT NULL), '{}'),
-		       a.created_at
+		       a.created_at, a.created_by
 		FROM apps a
 		LEFT JOIN app_capabilities c ON c.app_id = a.id
 		WHERE a.id = $1
-		GROUP BY a.id, a.name, a.description, a.min_grade, a.active, a.created_at`
+		GROUP BY a.id, a.name, a.description, a.min_grade, a.active, a.created_at, a.created_by`
 
 	ctx, cancel := context.WithTimeout(ctx, storeQueryTimeout)
 	defer cancel()
 
 	var a App
-	err := s.pool.QueryRow(ctx, q, id).Scan(&a.ID, &a.Name, &a.Description, &a.MinGrade, &a.Active, &a.Capabilities, &a.CreatedAt)
+	err := s.pool.QueryRow(ctx, q, id).Scan(&a.ID, &a.Name, &a.Description, &a.MinGrade, &a.Active, &a.Capabilities, &a.CreatedAt, &a.CreatedBy)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return App{}, ErrAppNotFound
 	}
@@ -656,17 +666,20 @@ func (s *pgStore) DeliveryLatency(ctx context.Context) (LatencyStats, error) {
 	return st, nil
 }
 
-func (s *pgStore) LatencySamples(ctx context.Context, limit int) ([]float64, error) {
+func (s *pgStore) LatencySamples(ctx context.Context, limit int) ([]LatencySample, error) {
 	// Same pairing semantics as DeliveryLatency (see the rationale there);
 	// this returns the individual per-trace values instead of percentiles,
 	// newest delivery first so the cap keeps the most recent traces.
+	// DISTINCT ON keeps the newest delivered row per trace so its app_id
+	// rides along (GROUP BY max(at) would lose the row's app).
 	const q = `
 		WITH deliv AS (
-			SELECT trace_id, max(at) AS delivered_at
+			SELECT DISTINCT ON (trace_id)
+			       trace_id, at AS delivered_at, COALESCE(app_id, '') AS app_id
 			FROM audit_log
 			WHERE stage = 'delivered' AND trace_id IS NOT NULL
 			  AND at >= now() - interval '24 hours'
-			GROUP BY trace_id
+			ORDER BY trace_id, at DESC
 		),
 		recv AS (
 			SELECT trace_id, min(at) AS received_at
@@ -675,7 +688,7 @@ func (s *pgStore) LatencySamples(ctx context.Context, limit int) ([]float64, err
 			  AND at >= now() - interval '25 hours'
 			GROUP BY trace_id
 		)
-		SELECT EXTRACT(EPOCH FROM (d.delivered_at - r.received_at)) AS secs
+		SELECT d.app_id, EXTRACT(EPOCH FROM (d.delivered_at - r.received_at)) AS secs
 		FROM deliv d JOIN recv r USING (trace_id)
 		WHERE d.delivered_at >= r.received_at
 		ORDER BY d.delivered_at DESC
@@ -689,13 +702,13 @@ func (s *pgStore) LatencySamples(ctx context.Context, limit int) ([]float64, err
 	}
 	defer rows.Close()
 
-	var samples []float64
+	var samples []LatencySample
 	for rows.Next() {
-		var secs float64
-		if scanErr := rows.Scan(&secs); scanErr != nil {
+		var sm LatencySample
+		if scanErr := rows.Scan(&sm.AppID, &sm.Secs); scanErr != nil {
 			return nil, fmt.Errorf("adminui: scan latency sample: %w", scanErr)
 		}
-		samples = append(samples, secs)
+		samples = append(samples, sm)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("adminui: rows: %w", err)

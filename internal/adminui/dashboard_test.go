@@ -401,7 +401,7 @@ func TestBuildLatencyStrip(t *testing.T) {
 		t.Fatalf("expected nil strip when no trace completed, got %+v", got)
 	}
 	v := buildLatencyStrip(
-		[]float64{0.004, 0.007, 0.012},
+		[]LatencySample{{AppID: "ci-notifier", Secs: 0.004}, {AppID: "ci-notifier", Secs: 0.007}, {Secs: 0.012}},
 		LatencyStats{Count: 3, P50: 0.007, P95: 0.012, Max: 0.012},
 	)
 	if v == nil {
@@ -411,34 +411,72 @@ func TestBuildLatencyStrip(t *testing.T) {
 		t.Errorf("unexpected strip stats: %+v", v)
 	}
 	svg := string(v.SVG)
-	if !strings.Contains(svg, "SLO 200ms") {
-		t.Errorf("expected the SLO reference line label: %s", svg)
-	}
 	if !strings.Contains(svg, "p50 7ms") {
 		t.Errorf("expected the p50 marker label: %s", svg)
 	}
-	// One hover dot per sample, each with its own value tooltip.
+	// One hover dot per sample; the tooltip names the delivering app, and
+	// an app-less sample falls back to the bare value.
 	if got := strings.Count(svg, "<circle"); got != 3 {
 		t.Errorf("expected 3 dots, got %d: %s", got, svg)
 	}
-	if !strings.Contains(svg, "<title>4ms</title>") {
-		t.Errorf("expected per-dot value titles: %s", svg)
+	if !strings.Contains(svg, "<title>ci-notifier · 4ms</title>") {
+		t.Errorf("expected app-qualified dot tooltips: %s", svg)
+	}
+	if !strings.Contains(svg, "<title>12ms</title>") {
+		t.Errorf("expected bare value tooltip for an app-less sample: %s", svg)
 	}
 }
 
-func TestBuildLatencyStripSlowSampleKeepsSLOVisible(t *testing.T) {
-	// A sample far beyond the SLO must stretch the axis, not push the SLO
-	// line off-plot.
-	v := buildLatencyStrip([]float64{1.2}, LatencyStats{Count: 1, P50: 1.2, P95: 1.2, Max: 1.2})
+func TestBuildLatencyStripAxisScalesToDataAndPinsSLO(t *testing.T) {
+	// Fast samples: the axis follows the data (12ms → nice(15.6) = 20ms),
+	// so the off-axis 200ms SLO pins to the right edge with its value
+	// spelled out — dots must spread, not huddle at the left of a 500ms axis.
+	v := buildLatencyStrip([]LatencySample{{Secs: 0.012}}, LatencyStats{Count: 1, P50: 0.012, P95: 0.012, Max: 0.012})
+	if v == nil {
+		t.Fatal("expected a strip view")
+	}
+	svg := string(v.SVG)
+	if !strings.Contains(svg, "SLO 200ms →") {
+		t.Errorf("off-axis SLO must pin right with the value spelled out: %s", svg)
+	}
+	if !strings.Contains(svg, ">20ms</text>") {
+		t.Errorf("axis should end at the data-driven 20ms, got: %s", svg)
+	}
+	if strings.Contains(svg, ">500ms</text>") {
+		t.Errorf("axis must not stretch to the SLO anymore: %s", svg)
+	}
+}
+
+func TestBuildLatencyStripSlowSampleKeepsSLOInPlace(t *testing.T) {
+	// A sample beyond the SLO stretches the axis past 200ms, so the SLO
+	// draws at its true position (no pin arrow).
+	v := buildLatencyStrip([]LatencySample{{Secs: 1.2}}, LatencyStats{Count: 1, P50: 1.2, P95: 1.2, Max: 1.2})
 	if v == nil {
 		t.Fatal("expected a strip view")
 	}
 	svg := string(v.SVG)
 	if !strings.Contains(svg, "SLO 200ms") {
-		t.Errorf("SLO line must stay on the axis: %s", svg)
+		t.Errorf("SLO label missing: %s", svg)
+	}
+	if strings.Contains(svg, "SLO 200ms →") {
+		t.Errorf("on-axis SLO must not carry the pinned arrow: %s", svg)
 	}
 	if strings.Contains(svg, "NaN") || strings.Contains(svg, "Inf") {
 		t.Errorf("SVG contains non-finite coordinates: %s", svg)
+	}
+}
+
+func TestBuildLatencyStripEscapesAppID(t *testing.T) {
+	v := buildLatencyStrip([]LatencySample{{AppID: "<script>x", Secs: 0.004}}, LatencyStats{Count: 1, P50: 0.004, P95: 0.004, Max: 0.004})
+	if v == nil {
+		t.Fatal("expected a strip view")
+	}
+	svg := string(v.SVG)
+	if strings.Contains(svg, "<script>") {
+		t.Errorf("raw app id leaked into SVG: %s", svg)
+	}
+	if !strings.Contains(svg, "&lt;script&gt;x · 4ms") {
+		t.Errorf("expected escaped app id in tooltip: %s", svg)
 	}
 }
 
@@ -468,10 +506,12 @@ func TestFormatLatency(t *testing.T) {
 
 func TestDashboardRendersLatencyStrip(t *testing.T) {
 	body := dashboardPage(t, &fakeStore{
-		latency:        LatencyStats{Count: 3, P50: 0.004, P95: 0.008, Max: 0.013},
-		latencySamples: []float64{0.004, 0.008, 0.013},
+		latency: LatencyStats{Count: 3, P50: 0.004, P95: 0.008, Max: 0.013},
+		latencySamples: []LatencySample{
+			{AppID: "ci-notifier", Secs: 0.004}, {AppID: "ci-notifier", Secs: 0.008}, {AppID: "ci-notifier", Secs: 0.013},
+		},
 	})
-	for _, want := range []string{"전달 지연", "received→delivered", "p50 4ms", "p95 8ms", "표본 3건", "SLO 200ms"} {
+	for _, want := range []string{"전달 지연", "received→delivered", "p50 4ms", "p95 8ms", "표본 3건", "SLO 200ms", "ci-notifier · 4ms"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("dashboard missing latency %q", want)
 		}
@@ -617,8 +657,16 @@ func TestDashboardEmptyPipelineAndPieShowNotes(t *testing.T) {
 	if !strings.Contains(body, "최근 24시간 파이프라인 트래픽이 없습니다") {
 		t.Error("expected the empty-pipeline note")
 	}
-	if !strings.Contains(body, "최근 24시간 집계된 실패가 없습니다") {
-		t.Error("expected the empty-causes note")
+	// Zero failures render the green ring (요청사항), not a text note and
+	// NOT the warning banner reserved for query errors.
+	if !strings.Contains(body, "최근 24시간 실패 없음") {
+		t.Error("expected the zero-failure note next to the green ring")
+	}
+	if !strings.Contains(body, `stroke="#16a34a" stroke-width="36"`) {
+		t.Error("expected the green zero-failure ring")
+	}
+	if strings.Contains(body, "실패 원인 집계를 불러오지 못했습니다") {
+		t.Error("zero failures must not render the error banner")
 	}
 }
 

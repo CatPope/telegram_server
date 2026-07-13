@@ -42,30 +42,109 @@ func TestDeliveryPageShowsDBUnavailableWithoutStore(t *testing.T) {
 	}
 }
 
-func TestDeliveryPageStoreErrorRendersBanner(t *testing.T) {
-	rec := deliveryGet(t, &fakeStore{err: errors.New("boom")}, "/delivery")
+// TestDeliveryDefaultViewIsFailures pins the 화면 분리 (요청사항): the bare
+// page shows the failures screen only — trend and funnel cards absent.
+func TestDeliveryDefaultViewIsFailures(t *testing.T) {
+	rec := deliveryGet(t, &fakeStore{}, "/delivery")
+	body := rec.Body.String()
+	if !strings.Contains(body, "최근 실패") {
+		t.Error("expected the failures card on the default view")
+	}
+	if !strings.Contains(body, "조건에 맞는 실패가 없습니다") {
+		t.Error("expected failures empty state")
+	}
+	if strings.Contains(body, "전달 추이 <") || strings.Contains(body, "앱별 전달 퍼널") {
+		t.Error("trend/funnel cards must not render on the failures view")
+	}
+}
+
+func TestDeliveryViewToggleRendersSelectedCardOnly(t *testing.T) {
+	trend := deliveryGet(t, &fakeStore{}, "/delivery?view=trend").Body.String()
+	if !strings.Contains(trend, "조건에 맞는 이벤트가 없습니다") {
+		t.Error("expected trend empty state on view=trend")
+	}
+	if strings.Contains(trend, "앱별 전달 퍼널") || strings.Contains(trend, "최신 30건") {
+		t.Error("funnel/failures cards must not render on the trend view")
+	}
+
+	funnel := deliveryGet(t, &fakeStore{}, "/delivery?view=funnel").Body.String()
+	if !strings.Contains(funnel, "트래픽이 없습니다") {
+		t.Error("expected funnel empty state on view=funnel")
+	}
+	if strings.Contains(funnel, "최신 30건") {
+		t.Error("failures card must not render on the funnel view")
+	}
+}
+
+func TestDeliveryGarbageViewFallsBackToFailures(t *testing.T) {
+	rec := deliveryGet(t, &fakeStore{}, "/delivery?view=%22%3E%3Cscript%3E")
+	body := rec.Body.String()
+	if !strings.Contains(body, "조건에 맞는 실패가 없습니다") {
+		t.Error("garbage view should fall back to the failures screen")
+	}
+	if strings.Contains(body, "<script") {
+		t.Error("view param must never be echoed raw")
+	}
+}
+
+// TestDeliveryViewRunsOnlyItsOwnQuery: the failures view must not pay for
+// the trend aggregate (and vice versa) — the other cards aren't rendered.
+func TestDeliveryViewRunsOnlyItsOwnQuery(t *testing.T) {
+	store := &fakeStore{}
+	deliveryGet(t, store, "/delivery") // failures view
+	if store.lastTrendFilter.Days != 0 {
+		t.Errorf("failures view must not run the trend query, got %+v", store.lastTrendFilter)
+	}
+	if store.lastFailureFilter.Days == 0 {
+		t.Error("failures view should run the failures query")
+	}
+
+	store = &fakeStore{}
+	deliveryGet(t, store, "/delivery?view=trend")
+	if store.lastTrendFilter.Days == 0 {
+		t.Error("trend view should run the trend query")
+	}
+	if store.lastFailureFilter.Days != 0 {
+		t.Errorf("trend view must not run the failures query, got %+v", store.lastFailureFilter)
+	}
+}
+
+// TestDeliveryToggleLinksPreserveFilters: switching screens must not reset
+// the operator's query, and the form must carry the view through 적용.
+func TestDeliveryToggleLinksPreserveFilters(t *testing.T) {
+	store := &fakeStore{
+		apps:       map[string]App{"a1": {ID: "a1"}},
+		errorCodes: []string{"capability_denied"},
+	}
+	rec := deliveryGet(t, store, "/delivery?view=trend&window=7d&app=a1&stage=denied&error=capability_denied")
+	body := rec.Body.String()
+	// url.Values encodes params alphabetically: app, error, stage, view, window.
+	for _, want := range []string{
+		`href="/delivery?app=a1&amp;error=capability_denied&amp;stage=denied&amp;view=failures&amp;window=7d"`,
+		`href="/delivery?app=a1&amp;error=capability_denied&amp;stage=denied&amp;view=funnel&amp;window=7d"`,
+		`<input type="hidden" name="view" value="trend">`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected toggle/form to preserve state: %q", want)
+		}
+	}
+}
+
+func TestDeliveryFunnelErrorRendersBanner(t *testing.T) {
+	rec := deliveryGet(t, &fakeStore{err: errors.New("boom")}, "/delivery?view=funnel")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "전달 현황 집계를 불러오지 못했습니다") {
-		t.Error("expected aggregate error banner")
+	if !strings.Contains(body, "퍼널 집계를 불러오지 못했습니다") {
+		t.Error("expected funnel error banner")
 	}
-	// The failures card must not claim "no failures" when the aggregate
-	// query failed — the failure query never ran. Same for the trend card.
-	if strings.Contains(body, "실패가 없습니다") {
-		t.Error("aggregate-error page must not render the green no-failures badge")
-	}
-	if !strings.Contains(body, "실패 목록을 불러오지 못했습니다") {
-		t.Error("expected the failures card to show its error state too")
-	}
-	if !strings.Contains(body, "추이 집계를 불러오지 못했습니다") {
-		t.Error("expected the trend card to show its error state too")
+	if strings.Contains(body, "트래픽이 없습니다") {
+		t.Error("funnel error must not render as the empty-traffic note")
 	}
 }
 
-func TestDeliveryPageRendersFunnelAndFailures(t *testing.T) {
-	uid := int64(100000042)
+func TestDeliveryPageRendersFunnel(t *testing.T) {
 	store := &fakeStore{
 		stageCounts: []AppStageCount{
 			{AppID: "notify-service", Stage: "received", Count: 100},
@@ -74,6 +153,19 @@ func TestDeliveryPageRendersFunnelAndFailures(t *testing.T) {
 			{AppID: "notify-service", Stage: "delivered", Count: 97},
 			{AppID: "notify-service", Stage: "denied", Count: 2},
 		},
+	}
+	rec := deliveryGet(t, store, "/delivery?view=funnel")
+	body := rec.Body.String()
+	for _, want := range []string{"notify-service", "성공률 97%", "denied 2"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected funnel body to contain %q", want)
+		}
+	}
+}
+
+func TestDeliveryPageRendersFailures(t *testing.T) {
+	uid := int64(100000042)
+	store := &fakeStore{
 		failures: []FailureRow{{
 			At:              time.Date(2026, 7, 7, 8, 41, 0, 0, time.UTC),
 			Stage:           "denied",
@@ -84,14 +176,8 @@ func TestDeliveryPageRendersFunnelAndFailures(t *testing.T) {
 		}},
 	}
 	rec := deliveryGet(t, store, "/delivery")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
 	body := rec.Body.String()
 	for _, want := range []string{
-		"notify-service",
-		"성공률 97%",
-		"denied 2",
 		">denied</span>",
 		"forbidden_capability",
 		"tr_9f31a0",
@@ -99,52 +185,30 @@ func TestDeliveryPageRendersFunnelAndFailures(t *testing.T) {
 		"07-07 08:41",
 	} {
 		if !strings.Contains(body, want) {
-			t.Errorf("expected body to contain %q", want)
+			t.Errorf("expected failures body to contain %q", want)
 		}
 	}
 }
 
-func TestDeliveryPageEmptyStates(t *testing.T) {
-	rec := deliveryGet(t, &fakeStore{}, "/delivery")
+func TestDeliveryFailureErrorRendersBanner(t *testing.T) {
+	rec := deliveryGet(t, &fakeStore{failuresErr: errors.New("boom")}, "/delivery")
 	body := rec.Body.String()
-	if !strings.Contains(body, "트래픽이 없습니다") {
-		t.Error("expected funnel empty state")
-	}
-	if !strings.Contains(body, "조건에 맞는 실패가 없습니다") {
-		t.Error("expected failures empty state")
-	}
-	if !strings.Contains(body, "조건에 맞는 이벤트가 없습니다") {
-		t.Error("expected trend empty state")
-	}
-}
-
-func TestDeliveryPageFailureQueryDegradesIndependently(t *testing.T) {
-	store := &fakeStore{
-		stageCounts: []AppStageCount{{AppID: "a1", Stage: "received", Count: 5}},
-		failuresErr: errors.New("boom"),
-	}
-	rec := deliveryGet(t, store, "/delivery")
-	body := rec.Body.String()
-	if !strings.Contains(body, "a1") {
-		t.Error("funnel should still render when the failure query fails")
-	}
 	if !strings.Contains(body, "실패 목록을 불러오지 못했습니다") {
 		t.Error("expected failure-table error banner")
 	}
+	if strings.Contains(body, "실패가 없습니다") {
+		t.Error("failure error must not render the green no-failures badge")
+	}
 }
 
-func TestDeliveryPageTrendQueryDegradesIndependently(t *testing.T) {
-	store := &fakeStore{
-		stageCounts: []AppStageCount{{AppID: "a1", Stage: "received", Count: 5}},
-		dailyErr:    errors.New("boom"),
-	}
-	rec := deliveryGet(t, store, "/delivery")
+func TestDeliveryTrendErrorRendersBanner(t *testing.T) {
+	rec := deliveryGet(t, &fakeStore{dailyErr: errors.New("boom")}, "/delivery?view=trend")
 	body := rec.Body.String()
-	if !strings.Contains(body, "a1") {
-		t.Error("funnel should still render when the trend query fails")
-	}
 	if !strings.Contains(body, "추이 집계를 불러오지 못했습니다") {
 		t.Error("expected trend error banner")
+	}
+	if strings.Contains(body, "조건에 맞는 이벤트가 없습니다") {
+		t.Error("trend error must not render as the empty note")
 	}
 }
 
@@ -157,7 +221,7 @@ func TestDeliveryPageRendersTrendChart(t *testing.T) {
 			{Day: time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC), Stage: "denied", Count: 1},
 		},
 	}
-	rec := deliveryGet(t, store, "/delivery")
+	rec := deliveryGet(t, store, "/delivery?view=trend")
 	body := rec.Body.String()
 	for _, want := range []string{"전달 추이", "<polyline", ">received<", ">delivered<", ">실패<"} {
 		if !strings.Contains(body, want) {
@@ -207,27 +271,32 @@ func TestDeliveryWindowInvalidFallsBackToDefault(t *testing.T) {
 }
 
 func TestDeliveryFiltersReachStoreAndEchoBack(t *testing.T) {
+	// One request per 화면 — each view's own query must receive the filters.
 	store := &fakeStore{
 		apps:       map[string]App{"a1": {ID: "a1"}},
 		errorCodes: []string{"capability_denied"},
 	}
-	rec := deliveryGet(t, store, "/delivery?window=7d&app=a1&stage=denied&error=capability_denied")
-	body := rec.Body.String()
+	filterQS := "window=7d&app=a1&stage=denied&error=capability_denied"
 
-	// Filters flow into every store query.
-	if store.lastStageApp != "a1" {
-		t.Errorf("StageCounts app filter = %q, want a1", store.lastStageApp)
-	}
-	wantTrend := TrendFilter{Days: 7, AppID: "a1", Stage: "denied", ErrorCode: "capability_denied"}
-	if store.lastTrendFilter != wantTrend {
-		t.Errorf("trend filter = %+v, want %+v", store.lastTrendFilter, wantTrend)
-	}
+	rec := deliveryGet(t, store, "/delivery?"+filterQS) // failures (default)
 	wantFail := FailureFilter{Days: 7, Limit: recentFailureLimit, AppID: "a1", Stage: "denied", ErrorCode: "capability_denied"}
 	if store.lastFailureFilter != wantFail {
 		t.Errorf("failure filter = %+v, want %+v", store.lastFailureFilter, wantFail)
 	}
 
+	deliveryGet(t, store, "/delivery?view=trend&"+filterQS)
+	wantTrend := TrendFilter{Days: 7, AppID: "a1", Stage: "denied", ErrorCode: "capability_denied"}
+	if store.lastTrendFilter != wantTrend {
+		t.Errorf("trend filter = %+v, want %+v", store.lastTrendFilter, wantTrend)
+	}
+
+	deliveryGet(t, store, "/delivery?view=funnel&"+filterQS)
+	if store.lastStageApp != "a1" {
+		t.Errorf("StageCounts app filter = %q, want a1", store.lastStageApp)
+	}
+
 	// And echo back into the form as selected options.
+	body := rec.Body.String()
 	for _, want := range []string{
 		`<option value="a1" selected>`,
 		`<option value="denied" selected>`,
@@ -244,7 +313,7 @@ func TestDeliveryUnknownStageFilterIgnored(t *testing.T) {
 	// A stage outside the dropdown whitelist must not reach the store (it
 	// would silently match nothing) — it resets to "전체".
 	store := &fakeStore{}
-	deliveryGet(t, store, "/delivery?stage=%22%3E%3Cscript%3E")
+	deliveryGet(t, store, "/delivery?view=trend&stage=%22%3E%3Cscript%3E")
 	if store.lastTrendFilter.Stage != "" {
 		t.Errorf("unknown stage should be dropped, got %q", store.lastTrendFilter.Stage)
 	}

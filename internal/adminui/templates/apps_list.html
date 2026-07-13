@@ -18,7 +18,7 @@
 <div class="card table-card">
 <table>
   <thead>
-    <tr><th>APP_ID</th><th>상태</th><th>CAPABILITIES</th><th>생성일</th><th></th></tr>
+    <tr><th>APP_ID</th><th>상태</th><th>CAPABILITIES</th><th>등록자</th><th>생성일</th><th></th></tr>
   </thead>
   <tbody>
   {{range .Apps}}
@@ -26,11 +26,13 @@
       <td class="mono">{{.ID}}</td>
       <td>{{if .Active}}<span class="badge badge-green">active</span>{{else}}<span class="badge badge-gray">inactive</span>{{end}}</td>
       <td class="mono" style="color:#4b5563;font-size:13px">{{range $i, $c := .Capabilities}}{{if $i}}, {{end}}{{$c}}{{end}}</td>
+      {{/* created_by는 0008 이전 행엔 없음 — 빈 값은 '-' */}}
+      <td class="mono" style="color:#4b5563;font-size:13px;white-space:nowrap">{{if .CreatedBy}}{{.CreatedBy}}{{else}}-{{end}}</td>
       <td style="color:#4b5563;white-space:nowrap">{{.CreatedAt.Format "2006-01-02"}}</td>
       <td style="text-align:right;white-space:nowrap"><a class="rowlink" href="/apps/{{.ID}}">상세 →</a></td>
     </tr>
   {{else}}
-    <tr><td colspan="5" style="color:#6b7280">등록된 앱이 없습니다.</td></tr>
+    <tr><td colspan="6" style="color:#6b7280">등록된 앱이 없습니다.</td></tr>
   {{end}}
   </tbody>
 </table>

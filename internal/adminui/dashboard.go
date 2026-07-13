@@ -237,9 +237,9 @@ func buildFailurePie(counts []ErrorCodeCount) *FailurePieView {
 	}
 
 	const (
-		size = 180.0
-		r    = 62.0
-		sw   = 30.0
+		size = 220.0
+		r    = 80.0
+		sw   = 36.0
 	)
 	c := size / 2
 	circ := 2 * math.Pi * r
@@ -265,8 +265,8 @@ func buildFailurePie(counts []ErrorCodeCount) *FailurePieView {
 		})
 		acc += frac
 	}
-	fmt.Fprintf(&b, `<text x="%.0f" y="%.0f" font-size="26" font-weight="800" fill="#111827" text-anchor="middle">%d</text>`, c, c-2, total)
-	fmt.Fprintf(&b, `<text x="%.0f" y="%.0f" font-size="11" fill="#6b7280" text-anchor="middle">실패 · 24h</text>`, c, c+16)
+	fmt.Fprintf(&b, `<text x="%.0f" y="%.0f" font-size="32" font-weight="800" fill="#111827" text-anchor="middle">%d</text>`, c, c-2, total)
+	fmt.Fprintf(&b, `<text x="%.0f" y="%.0f" font-size="12" fill="#6b7280" text-anchor="middle">실패 · 24h</text>`, c, c+20)
 	b.WriteString(`</svg>`)
 
 	return &FailurePieView{SVG: template.HTML(b.String()), Legend: legend, Total: total} //nolint:gosec // numeric/escaped content built above
@@ -297,28 +297,34 @@ func formatAxisMs(ms float64) string {
 }
 
 // buildLatencyStrip renders the delivery-latency strip plot: one dot per
-// completed trace (deterministic vertical jitter so ties stay visible), a
-// p50 marker, and the 200ms SLO reference line. Returns nil when nothing
-// completed in the window.
-func buildLatencyStrip(samples []float64, stats LatencyStats) *LatencyStripView {
+// completed trace (deterministic vertical jitter so ties stay visible),
+// each carrying its app in the hover tooltip, plus a p50 marker and the
+// 200ms SLO reference line. The axis scales to the DATA, not the SLO — a
+// fleet of 6ms deliveries must spread across the plot instead of huddling
+// at the left of a 500ms axis. When the SLO then falls beyond the axis,
+// its dashed line pins to the right edge with the value spelled out
+// (요청사항: 한계선이 범위를 벗어나면 오른쪽에 배치 + 숫자 표시).
+// Returns nil when nothing completed in the window.
+func buildLatencyStrip(samples []LatencySample, stats LatencyStats) *LatencyStripView {
 	if len(samples) == 0 {
 		return nil
 	}
 
 	maxMs := 0.0
 	for _, s := range samples {
-		if ms := s * 1000; ms > maxMs {
+		if ms := s.Secs * 1000; ms > maxMs {
 			maxMs = ms
 		}
 	}
-	// Keep the SLO line on-axis even when everything is fast.
-	axisMax := niceAxisMax(math.Max(maxMs*1.15, latencySLOMillis*1.1))
+	// 1.3 headroom keeps the slowest dot off the right edge; the SLO no
+	// longer inflates the axis (it pins to the edge instead, below).
+	axisMax := niceAxisMax(maxMs * 1.3)
 
 	const (
-		w, h       = 640.0, 120.0
+		w, h       = 640.0, 150.0
 		padL, padR = 10.0, 14.0
-		axisY      = 92.0
-		dotY       = 52.0
+		axisY      = 118.0
+		dotY       = 66.0
 	)
 	plotW := w - padL - padR
 	xAt := func(ms float64) float64 { return padL + plotW*ms/axisMax }
@@ -339,31 +345,43 @@ func buildLatencyStrip(samples []float64, stats LatencyStats) *LatencyStripView 
 		}
 		fmt.Fprintf(&b, `<text x="%.1f" y="%.1f" font-size="11" fill="#9ca3af" text-anchor="%s">%s</text>`, x, axisY+18, anchor, formatAxisMs(ms))
 	}
-	// SLO reference line.
+	// SLO reference line: at its true position when on-axis, pinned to the
+	// right edge (value spelled out) when the data axis ends before it.
 	sloX := xAt(latencySLOMillis)
-	fmt.Fprintf(&b, `<line x1="%.1f" y1="14" x2="%.1f" y2="%.1f" stroke="#dc2626" stroke-width="1.5" stroke-dasharray="4 3"/>`, sloX, sloX, axisY)
+	sloLabel := fmt.Sprintf("SLO %.0fms", latencySLOMillis)
+	if latencySLOMillis > axisMax {
+		sloX = w - padR
+		sloLabel += " →"
+	}
+	fmt.Fprintf(&b, `<line x1="%.1f" y1="16" x2="%.1f" y2="%.1f" stroke="#dc2626" stroke-width="1.5" stroke-dasharray="4 3"/>`, sloX, sloX, axisY)
 	sloAnchor := "middle"
-	if sloX > w-70 {
+	if sloX > w-80 {
 		sloAnchor = "end"
 	}
-	fmt.Fprintf(&b, `<text x="%.1f" y="10" font-size="11" fill="#dc2626" text-anchor="%s">SLO %.0fms</text>`, sloX, sloAnchor, latencySLOMillis)
+	fmt.Fprintf(&b, `<text x="%.1f" y="12" font-size="11" fill="#dc2626" text-anchor="%s">%s</text>`, sloX, sloAnchor, sloLabel)
 	// p50 marker.
 	p50Ms := stats.P50 * 1000
 	p50X := xAt(math.Min(p50Ms, axisMax))
-	fmt.Fprintf(&b, `<line x1="%.1f" y1="34" x2="%.1f" y2="70" stroke="#111827" stroke-width="2"/>`, p50X, p50X)
-	fmt.Fprintf(&b, `<text x="%.1f" y="28" font-size="11" font-weight="600" fill="#111827" text-anchor="middle">p50 %s</text>`, p50X, formatLatency(stats.P50))
+	fmt.Fprintf(&b, `<line x1="%.1f" y1="42" x2="%.1f" y2="90" stroke="#111827" stroke-width="2"/>`, p50X, p50X)
+	fmt.Fprintf(&b, `<text x="%.1f" y="36" font-size="11" font-weight="600" fill="#111827" text-anchor="middle">p50 %s</text>`, p50X, formatLatency(stats.P50))
 	// Dots — index-based jitter (no randomness: pages must render identically
-	// on refresh) spreads overlapping fast traces vertically.
-	jitter := []float64{0, -7, 7, -13, 13}
+	// on refresh) spreads overlapping fast traces vertically. The tooltip
+	// names the delivering app (요청사항: 발생 앱과 수치); app ids come from
+	// the DB but are escaped anyway — defense in depth.
+	jitter := []float64{0, -9, 9, -17, 17}
 	for i, s := range samples {
-		ms := s * 1000
-		fmt.Fprintf(&b, `<circle cx="%.1f" cy="%.1f" r="5" fill="#2563eb" fill-opacity="0.55"><title>%s</title></circle>`,
-			xAt(math.Min(ms, axisMax)), dotY+jitter[i%len(jitter)], formatLatency(s))
+		ms := s.Secs * 1000
+		title := formatLatency(s.Secs)
+		if s.AppID != "" {
+			title = template.HTMLEscapeString(s.AppID) + " · " + title
+		}
+		fmt.Fprintf(&b, `<circle cx="%.1f" cy="%.1f" r="6" fill="#2563eb" fill-opacity="0.55"><title>%s</title></circle>`,
+			xAt(math.Min(ms, axisMax)), dotY+jitter[i%len(jitter)], title)
 	}
 	b.WriteString(`</svg>`)
 
 	return &LatencyStripView{
-		SVG:   template.HTML(b.String()), //nolint:gosec // numeric content built above
+		SVG:   template.HTML(b.String()), //nolint:gosec // numeric/escaped content built above
 		Count: stats.Count,
 		Shown: len(samples),
 		P50:   formatLatency(stats.P50),

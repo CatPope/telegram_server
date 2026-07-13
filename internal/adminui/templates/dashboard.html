@@ -77,7 +77,7 @@
     {{if .StripErr}}
     <div class="banner banner-warn" style="margin:12px 0 0">전달 지연 지표를 불러오지 못했습니다</div>
     {{else if .Strip}}{{with .Strip}}
-    <p class="caption" style="margin:4px 0 0">p50 {{.P50}} · p95 {{.P95}} · 최대 {{.Max}} · 표본 {{.Count}}건{{if gt .Count .Shown}} · 최신 {{.Shown}}건 표시{{end}} (점에 마우스를 대면 개별 값)</p>
+    <p class="caption" style="margin:4px 0 0">p50 {{.P50}} · p95 {{.P95}} · 최대 {{.Max}} · 표본 {{.Count}}건{{if gt .Count .Shown}} · 최신 {{.Shown}}건 표시{{end}} (점에 마우스를 대면 발생 앱·개별 값)</p>
     {{.SVG}}
     {{end}}
     {{else}}
@@ -124,7 +124,18 @@
       </div>
     </div>
     {{else}}
-    <p class="caption" style="margin-top:12px">최근 24시간 집계된 실패가 없습니다. <a class="rowlink" href="/delivery">전달 현황 →</a></p>
+    {{/* 실패 0건 — 초록 링으로 "정상"을 표시 (요청사항). 쿼리 에러는 위의
+         경고 배너 분기가 담당하므로 이 초록은 진짜 0건에서만 나온다. */}}
+    <div class="pie-wrap">
+      <svg viewBox="0 0 220 220" role="img" aria-label="최근 24시간 실패 없음" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="110" cy="110" r="80" fill="none" stroke="#16a34a" stroke-width="36"/>
+        <text x="110" y="108" font-size="32" font-weight="800" fill="#15803d" text-anchor="middle">0</text>
+        <text x="110" y="130" font-size="12" fill="#6b7280" text-anchor="middle">실패 · 24h</text>
+      </svg>
+      <div class="pie-legend">
+        <p class="caption" style="margin:0">✓ 최근 24시간 실패 없음 <a class="rowlink" href="/delivery">전달 현황 →</a></p>
+      </div>
+    </div>
     {{end}}
   </div>
 </div>

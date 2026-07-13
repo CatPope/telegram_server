@@ -26,7 +26,7 @@ type fakeStore struct {
 	causesErr      error
 	latency        LatencyStats
 	latencyErr     error
-	latencySamples []float64
+	latencySamples []LatencySample
 	samplesErr     error
 	bucketsErr     error
 	daily          []StageDayCount
@@ -125,7 +125,7 @@ func (f *fakeStore) DeliveryLatency(context.Context) (LatencyStats, error) {
 	return f.latency, nil
 }
 
-func (f *fakeStore) LatencySamples(context.Context, int) ([]float64, error) {
+func (f *fakeStore) LatencySamples(context.Context, int) ([]LatencySample, error) {
 	if f.samplesErr != nil {
 		return nil, f.samplesErr
 	}

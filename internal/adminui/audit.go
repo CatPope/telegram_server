@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/http"
+	"net/url"
 	"slices"
 	"sort"
 	"strconv"
@@ -39,21 +40,36 @@ var auditStages = []string{
 	"key_revoked",
 }
 
-// auditLimitOptions is the limit dropdown — the server accepts 1~500 and
-// defaults to 50, so the dropdown offers the useful steps of that range.
-var auditLimitOptions = []string{"50", "100", "200", "500"}
+// auditLimitOptions is the limit dropdown (요청사항: 10/20/30/50). The
+// server accepts up to 500; pages beyond the limit are reached via the
+// keyset pagination below rather than a bigger page.
+var auditLimitOptions = []string{"10", "20", "30", "50"}
+
+// defaultAuditLimit is the page size when the query names none — applied
+// UI-side so pagination math never depends on the server's default (50).
+const defaultAuditLimit = "10"
 
 // AuditFilters echoes the operator's GET query back into the filter form
 // so a submitted search keeps its inputs visible alongside the results.
 // Since/Until hold the date-picker values (2006-01-02); they are converted
 // to the RFC3339 instants the /admin API expects only when querying.
+// BeforeID is the pagination cursor (not a form field): only rows with a
+// smaller audit_log id are returned, so "다음" walks back in insertion order.
 type AuditFilters struct {
-	Limit   string
-	Since   string
-	Until   string
-	TraceID string
-	AppID   string
-	Stage   string
+	Limit    string
+	Since    string
+	Until    string
+	TraceID  string
+	AppID    string
+	Stage    string
+	BeforeID string
+}
+
+// defaultAuditFilters is the bare-page state (요청사항: 기본적으로 당일
+// 데이터): today's window at the smallest page size. Shared by the plain
+// GET /audit landing and the verify re-render.
+func defaultAuditFilters(now time.Time) AuditFilters {
+	return AuditFilters{Since: now.UTC().Format("2006-01-02"), Limit: defaultAuditLimit}
 }
 
 // auditDateToRFC3339 converts a date-picker value (2006-01-02) to the
@@ -87,8 +103,10 @@ func normalizeAuditDate(v string) string {
 
 // AuditDisplayRow is an AuditRow flattened for the template: nullable
 // columns become plain strings ("" when NULL) so the table renders values,
-// not pointer addresses.
+// not pointer addresses. ID is the audit_log PK — the pagination cursor,
+// not a rendered column.
 type AuditDisplayRow struct {
+	ID              int64
 	At              string
 	Stage           string
 	StageBadge      string
@@ -133,14 +151,25 @@ func auditTimeLabel(at string) string {
 // etc.) surface here as Korean banners instead of being re-checked in the
 // UI.
 func (s *Server) handleAuditPage(w http.ResponseWriter, r *http.Request) {
+	// Bare landing (no query string at all) → today's window. An explicit
+	// search that cleared the dates (since= present but empty) is a
+	// deliberate "all time" request and is respected as-is.
+	if r.URL.RawQuery == "" {
+		s.render(w, "audit.html", s.auditPageData(r, defaultAuditFilters(time.Now())))
+		return
+	}
 	q := r.URL.Query()
 	filters := AuditFilters{
-		Limit:   q.Get("limit"),
-		Since:   normalizeAuditDate(q.Get("since")),
-		Until:   normalizeAuditDate(q.Get("until")),
-		TraceID: q.Get("trace_id"),
-		AppID:   q.Get("app_id"),
-		Stage:   q.Get("stage"),
+		Limit:    q.Get("limit"),
+		Since:    normalizeAuditDate(q.Get("since")),
+		Until:    normalizeAuditDate(q.Get("until")),
+		TraceID:  q.Get("trace_id"),
+		AppID:    q.Get("app_id"),
+		Stage:    q.Get("stage"),
+		BeforeID: q.Get("before_id"),
+	}
+	if filters.Limit == "" {
+		filters.Limit = defaultAuditLimit
 	}
 	s.render(w, "audit.html", s.auditPageData(r, filters))
 }
@@ -172,22 +201,42 @@ func (s *Server) auditPageData(r *http.Request, filters AuditFilters) pageData {
 		}
 	}
 
+	// Pagination: ask for one row beyond the page size — the surplus row
+	// proves a next page exists without a count query. A non-numeric limit
+	// passes through untouched so the server stays the single validator
+	// (its invalid_limit comes back as the usual Korean banner). The +1 is
+	// clamped to the server's max (500) so a legacy ?limit=500 bookmark
+	// still returns results — it merely loses the has-next probe.
+	fetchLimit := filters.Limit
+	pageSize := 0
+	if n, convErr := strconv.Atoi(filters.Limit); convErr == nil && n > 0 {
+		pageSize = n
+		fetchLimit = strconv.Itoa(min(n+1, 500))
+	}
+
 	rows, err := s.client.SearchAudit(r.Context(), apiclient.AuditSearchParams{
-		Limit:   filters.Limit,
-		Since:   auditDateToRFC3339(filters.Since, false),
-		Until:   auditDateToRFC3339(filters.Until, true),
-		TraceID: filters.TraceID,
-		AppID:   filters.AppID,
-		Stage:   filters.Stage,
+		Limit:    fetchLimit,
+		Since:    auditDateToRFC3339(filters.Since, false),
+		Until:    auditDateToRFC3339(filters.Until, true),
+		TraceID:  filters.TraceID,
+		AppID:    filters.AppID,
+		Stage:    filters.Stage,
+		BeforeID: filters.BeforeID,
 	})
 	if err != nil {
 		data.Error = friendlyAPIError(err)
 		return data
 	}
 
+	hasNext := pageSize > 0 && len(rows) > pageSize
+	if hasNext {
+		rows = rows[:pageSize]
+	}
+
 	data.AuditRows = make([]AuditDisplayRow, 0, len(rows))
 	for _, row := range rows {
 		data.AuditRows = append(data.AuditRows, AuditDisplayRow{
+			ID:              row.ID,
 			At:              auditTimeLabel(row.At),
 			Stage:           row.Stage,
 			StageBadge:      stageBadge(row.Stage),
@@ -199,7 +248,39 @@ func (s *Server) auditPageData(r *http.Request, filters AuditFilters) pageData {
 			TraceID:         strOrEmpty(row.TraceID),
 		})
 	}
+
+	// Keyset links: "다음" cursors on the last displayed row's id (rows are
+	// id-descending); "처음" drops the cursor. Both preserve every filter.
+	if hasNext && len(data.AuditRows) > 0 {
+		last := data.AuditRows[len(data.AuditRows)-1]
+		data.AuditNextURL = auditPageURL(filters, strconv.FormatInt(last.ID, 10))
+	}
+	if filters.BeforeID != "" {
+		data.AuditFirstURL = auditPageURL(filters, "")
+	}
 	return data
+}
+
+// auditPageURL rebuilds /audit with the filter state and the given
+// pagination cursor ("" = first page). Empty filters stay out of the URL.
+func auditPageURL(f AuditFilters, beforeID string) string {
+	v := url.Values{}
+	set := func(k, val string) {
+		if val != "" {
+			v.Set(k, val)
+		}
+	}
+	set("stage", f.Stage)
+	set("app_id", f.AppID)
+	set("trace_id", f.TraceID)
+	set("limit", f.Limit)
+	set("since", f.Since)
+	set("until", f.Until)
+	set("before_id", beforeID)
+	if len(v) == 0 {
+		return "/audit"
+	}
+	return "/audit?" + v.Encode()
 }
 
 // AuditVerifyView is one verification run's outcome, rendered in the
@@ -228,7 +309,9 @@ type AuditVerifyBreak struct {
 // issuance: the result never travels through a query parameter, so it
 // cannot be forged by crafting a URL.
 func (s *Server) handleAuditVerify(w http.ResponseWriter, r *http.Request) {
-	data := s.auditPageData(r, AuditFilters{})
+	// The verify POST re-renders the bare page under the result card, so it
+	// uses the same today-window defaults as the plain GET landing.
+	data := s.auditPageData(r, defaultAuditFilters(time.Now()))
 	if s.store == nil {
 		data.Error = "무결성 검증은 DB 연결이 필요합니다"
 		s.render(w, "audit.html", data)

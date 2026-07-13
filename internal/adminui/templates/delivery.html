@@ -5,9 +5,11 @@
 <div class="banner banner-warn">DB 미연결 — DATABASE_URL이 설정되어야 전달 현황을 집계할 수 있습니다.</div>
 {{else}}
 
-{{/* 필터 — 기간(드롭다운) · 앱 · 유형(stage) · 에러 유형 */}}
+{{/* 필터 — 기간(드롭다운) · 앱 · 유형(stage) · 에러 유형. hidden view로
+     폼 제출(적용) 시에도 현재 화면이 유지된다. */}}
 <div class="card">
   <form method="get" action="/delivery" class="filter-form">
+    <input type="hidden" name="view" value="{{$d.View}}">
     <div style="width:130px">
       <label class="field" for="window">기간</label>
       <select id="window" name="window">
@@ -39,10 +41,19 @@
       </select>
     </div>
     <button type="submit" class="btn btn-primary">적용</button>
-    {{if $d.Filtered}}<a class="rowlink" href="/delivery?window={{$d.Window}}" style="align-self:center">필터 초기화</a>{{end}}
+    {{if $d.Filtered}}<a class="rowlink" href="/delivery?view={{$d.View}}&window={{$d.Window}}" style="align-self:center">필터 초기화</a>{{end}}
   </form>
 </div>
 
+{{/* 화면 토글 — API 키 화면과 같은 .seg 그룹. 링크는 현재 필터를 보존한다. */}}
+<div class="toolbar">
+  <span class="tlabel">화면</span>
+  <span class="seg">
+    {{range $d.Views}}<a href="{{.URL}}" class="{{if .On}}on{{end}}">{{.Label}}</a>{{end}}
+  </span>
+</div>
+
+{{if eq $d.View "trend"}}
 {{/* 시각화 — 필터 적용된 일자별 추이 */}}
 <div class="card">
   <div class="card-head">
@@ -62,10 +73,13 @@
   {{end}}
 </div>
 
+{{else if eq $d.View "funnel"}}
 <div class="card">
   <h2>앱별 전달 퍼널</h2>
   <p class="caption">{{$d.WindowLabel}}{{if $d.AppFilter}} · 앱 {{$d.AppFilter}}{{end}} · 성공률 = delivered / received (유형·에러 필터는 추이/실패 목록에만 적용)</p>
-  {{if $d.Funnels}}
+  {{if $d.FunnelsErr}}
+  <div class="banner banner-warn" style="margin:0">퍼널 집계를 불러오지 못했습니다</div>
+  {{else if $d.Funnels}}
     {{range $d.Funnels}}
     <div class="funnel">
       <div class="fhead">
@@ -90,6 +104,7 @@
   {{end}}
 </div>
 
+{{else}}
 <div class="card table-card">
   <div style="padding:20px 20px 0">
     <h2>최근 실패</h2>
@@ -121,6 +136,7 @@
     </div>
   {{end}}
 </div>
+{{end}}
 
 {{end}}
 {{end}}

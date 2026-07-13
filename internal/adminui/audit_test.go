@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -18,7 +19,8 @@ func TestAuditPagePassesFiltersAndRendersRows(t *testing.T) {
 			t.Errorf("path = %q", r.URL.Path)
 		}
 		q := r.URL.Query()
-		if q.Get("stage") != "key_issued" || q.Get("app_id") != "ci-notifier" || q.Get("limit") != "10" {
+		// The page asks for limit+1 — the surplus row is the has-next probe.
+		if q.Get("stage") != "key_issued" || q.Get("app_id") != "ci-notifier" || q.Get("limit") != "11" {
 			t.Errorf("query = %q", r.URL.RawQuery)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -66,6 +68,202 @@ func TestAuditPagePassesFiltersAndRendersRows(t *testing.T) {
 	}
 	if !strings.Contains(body, `<option value="key_issued" selected>`) {
 		t.Error("stage dropdown selection not preserved")
+	}
+	// Two rows against a page size of 10 → no pagination controls.
+	if strings.Contains(body, "다음 →") {
+		t.Error("next link must not render when the page is not full")
+	}
+}
+
+func TestAuditPageDefaultsToTodayAndLimit10(t *testing.T) {
+	// 요청사항: bare landing loads today's data at the smallest page size.
+	var gotQuery url.Values
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[],"limit":11}`))
+	}))
+	defer target.Close()
+
+	cfg := testConfig(t, target.URL)
+	handler, err := NewServer(cfg, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	cookies := loginSession(t, handler, cfg)
+
+	req := httptest.NewRequest(http.MethodGet, "/audit", nil)
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	today := time.Now().UTC().Format("2006-01-02")
+	if got := gotQuery.Get("since"); got != today+"T00:00:00Z" {
+		t.Errorf("default since = %q, want start of today", got)
+	}
+	if got := gotQuery.Get("limit"); got != "11" {
+		t.Errorf("default limit fetch = %q, want %q (10+1 probe)", got, "11")
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `value="`+today+`"`) {
+		t.Error("today's date not shown in the since picker")
+	}
+	if !strings.Contains(body, `<option value="10" selected>`) {
+		t.Error("default limit 10 not selected in the dropdown")
+	}
+}
+
+func TestAuditPageExplicitEmptySearchRespected(t *testing.T) {
+	// A submitted search with cleared dates is an "all time" request — the
+	// today default applies ONLY to the bare landing (no query string).
+	var gotQuery url.Values
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[],"limit":11}`))
+	}))
+	defer target.Close()
+
+	cfg := testConfig(t, target.URL)
+	handler, err := NewServer(cfg, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	cookies := loginSession(t, handler, cfg)
+
+	req := httptest.NewRequest(http.MethodGet, "/audit?since=&until=&stage=denied&limit=10", nil)
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if gotQuery.Has("since") {
+		t.Errorf("cleared since must not be defaulted, got %q", gotQuery.Get("since"))
+	}
+	if gotQuery.Get("stage") != "denied" {
+		t.Errorf("stage filter lost: %q", gotQuery.Encode())
+	}
+}
+
+// paginationTarget serves id-descending rows [from, from-count+1] so
+// pagination tests can hand the page exactly limit+1 (or fewer) rows.
+func paginationTarget(t *testing.T, gotQuery *url.Values, from, count int) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		*gotQuery = r.URL.Query()
+		rows := make([]string, 0, count)
+		for i := range count {
+			id := from - i
+			rows = append(rows, `{"id":`+strconv.Itoa(id)+`,"at":"2026-07-13T10:00:00Z","stage":"received","app_id":"a1","trace_id":"trace-`+strconv.Itoa(id)+`","details_json":{}}`)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[` + strings.Join(rows, ",") + `],"limit":11}`))
+	}))
+}
+
+func TestAuditPageLimitProbeClampsToServerMax(t *testing.T) {
+	// A legacy ?limit=500 bookmark: the +1 probe must clamp to the server's
+	// max (500) instead of sending 501 and bouncing off invalid_limit.
+	var gotQuery url.Values
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[],"limit":500}`))
+	}))
+	defer target.Close()
+
+	cfg := testConfig(t, target.URL)
+	handler, err := NewServer(cfg, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	cookies := loginSession(t, handler, cfg)
+
+	req := httptest.NewRequest(http.MethodGet, "/audit?limit=500", nil)
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if got := gotQuery.Get("limit"); got != "500" {
+		t.Errorf("fetch limit = %q, want clamped %q", got, "500")
+	}
+	if strings.Contains(rec.Body.String(), "limit은 1~500") {
+		t.Error("clamped fetch must not surface the invalid_limit banner")
+	}
+}
+
+func TestAuditPagePaginationNextLink(t *testing.T) {
+	// 11 rows (ids 30..20) against page size 10 → rows 30..21 render and
+	// "다음" cursors on id 21, preserving the filters.
+	var gotQuery url.Values
+	target := paginationTarget(t, &gotQuery, 30, 11)
+	defer target.Close()
+
+	cfg := testConfig(t, target.URL)
+	handler, err := NewServer(cfg, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	cookies := loginSession(t, handler, cfg)
+
+	req := httptest.NewRequest(http.MethodGet, "/audit?stage=received&limit=10", nil)
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if !strings.Contains(body, "trace-21") {
+		t.Error("10th row (id 21) should render")
+	}
+	if strings.Contains(body, "trace-20") {
+		t.Error("11th probe row (id 20) must be trimmed from the page")
+	}
+	// url.Values.Encode orders keys alphabetically; & is HTML-escaped.
+	if !strings.Contains(body, `href="/audit?before_id=21&amp;limit=10&amp;stage=received"`) {
+		t.Errorf("next link missing or wrong, body: %s", body)
+	}
+	if strings.Contains(body, "« 처음") {
+		t.Error("first-page link must not render on page one")
+	}
+}
+
+func TestAuditPagePaginationLastPage(t *testing.T) {
+	// A cursored page with fewer than limit rows: before_id reaches the
+	// API, "처음" (without the cursor) renders, and "다음" does not.
+	var gotQuery url.Values
+	target := paginationTarget(t, &gotQuery, 19, 5)
+	defer target.Close()
+
+	cfg := testConfig(t, target.URL)
+	handler, err := NewServer(cfg, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	cookies := loginSession(t, handler, cfg)
+
+	req := httptest.NewRequest(http.MethodGet, "/audit?stage=received&limit=10&before_id=21", nil)
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if got := gotQuery.Get("before_id"); got != "21" {
+		t.Errorf("before_id not passed to the API: %q", got)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, "다음 →") {
+		t.Error("next link must not render on the last page")
+	}
+	if !strings.Contains(body, `href="/audit?limit=10&amp;stage=received"`) {
+		t.Errorf("first-page link (cursor dropped, filters kept) missing, body: %s", body)
 	}
 }
 

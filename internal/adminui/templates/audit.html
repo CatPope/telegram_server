@@ -90,5 +90,14 @@
   {{end}}
   </tbody>
 </table>
+{{/* 키셋 페이지네이션 — limit을 넘는 데이터가 있으면 다음 페이지로 넘긴다.
+     '다음'은 마지막 표시 행 id를 커서로, '처음'은 커서만 제거(필터 유지). */}}
+{{if or .AuditNextURL .AuditFirstURL}}
+<div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-top:1px solid #f3f4f6">
+  {{if .AuditFirstURL}}<a class="btn btn-outline" href="{{.AuditFirstURL}}">« 처음</a>{{end}}
+  <span style="flex:1"></span>
+  {{if .AuditNextURL}}<a class="btn btn-outline" href="{{.AuditNextURL}}">다음 →</a>{{end}}
+</div>
+{{end}}
 </div>
 {{end}}
