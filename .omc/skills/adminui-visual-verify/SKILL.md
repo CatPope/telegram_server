@@ -90,6 +90,6 @@ cd "<scratchpad>" && node shoot-dash.mjs
 - 24h 윈도 집계를 검증하려면 방금 만든 트래픽이 윈도 안에 있는지 postgres로 확인:
   `docker exec -e PGPASSWORD=telegram telegram_server-postgres-1 psql -U telegram -d telegram_server -c "..."`.
 
-## 5. 산출
+## 5. 산출 — 판독 후 테스트 보고서에 첨부 (필수)
 
-스크린샷은 `test-report` skill이 요구하는 테스트 보고서에 **첨부**된다. 촬영 후 반드시 `docs/dev/test-reports/assets/<slug>/`로 옮겨 보고서에 임베드하고 커밋한다(사용자 영구 지시: 화면 테스트는 캡처 첨부).
+먼저 스크린샷을 그 세션 안에서 **Read로 판독**해 레이아웃 붕괴 여부를 확인한다(이게 검증의 핵심). 그다음 촬영한 스크린샷을 **반드시 테스트 보고서에 첨부**한다 — 글로벌 `test-documentation` 스킬 규약(화면 테스트는 캡처 첨부 필수). 이 프로젝트에서는 `docs/test-reports/assets/<slug>/`로 옮겨 보고서에 임베드하고 커밋한다.
