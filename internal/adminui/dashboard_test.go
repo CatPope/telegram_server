@@ -2,6 +2,7 @@ package adminui
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,8 +19,33 @@ func day(t *testing.T, s string) time.Time {
 	return d
 }
 
+// weekRange is the 7-day/daily toggle entry most line-chart tests use —
+// the pre-toggle behavior, so the existing bucketing expectations carry over.
+func weekRange(t *testing.T) chartRange {
+	t.Helper()
+	cr := resolveChartRange("week")
+	if cr.Spec.Unit != "day" || cr.Spec.Buckets != 7 {
+		t.Fatalf("week range spec changed: %+v", cr.Spec)
+	}
+	return cr
+}
+
+func TestResolveChartRange(t *testing.T) {
+	if got := resolveChartRange("year"); got.Spec.Unit != "month" || got.Spec.Buckets != 12 {
+		t.Errorf("year range = %+v", got.Spec)
+	}
+	// Unknown (or empty) keys fall back to the default first entry.
+	def := resolveChartRange("")
+	if def.Key != chartRanges[0].Key {
+		t.Errorf("empty key should resolve to the default range, got %q", def.Key)
+	}
+	if got := resolveChartRange(`"><script>`); got.Key != chartRanges[0].Key {
+		t.Errorf("garbage key should resolve to the default range, got %q", got.Key)
+	}
+}
+
 func TestBuildLineChartEmptySeries(t *testing.T) {
-	if got := buildLineChart(nil, 7, time.Now().UTC()); got != nil {
+	if got := buildLineChart(nil, weekRange(t), time.Now().UTC()); got != nil {
 		t.Fatalf("expected nil chart for empty series, got %+v", got)
 	}
 }
@@ -29,7 +55,7 @@ func TestBuildLineChartDropsOutOfWindowPoints(t *testing.T) {
 	series := []AppDayCount{
 		{AppID: "old-app", Day: day(t, "2026-06-01"), Count: 99}, // outside 7d window
 	}
-	if got := buildLineChart(series, 7, now); got != nil {
+	if got := buildLineChart(series, weekRange(t), now); got != nil {
 		t.Fatalf("expected nil chart when every point is out of window, got %+v", got)
 	}
 }
@@ -40,7 +66,7 @@ func TestBuildLineChartSingleAppRendersPolylineAndLegend(t *testing.T) {
 		{AppID: "notify-service", Day: day(t, "2026-07-07"), Count: 3},
 		{AppID: "notify-service", Day: day(t, "2026-07-08"), Count: 5},
 	}
-	chart := buildLineChart(series, 7, now)
+	chart := buildLineChart(series, weekRange(t), now)
 	if chart == nil {
 		t.Fatal("expected a chart")
 	}
@@ -51,20 +77,83 @@ func TestBuildLineChartSingleAppRendersPolylineAndLegend(t *testing.T) {
 	if len(chart.Legend) != 1 || chart.Legend[0].Label != "notify-service" {
 		t.Errorf("unexpected legend: %+v", chart.Legend)
 	}
-	// App ids appear only in the template-escaped legend, never raw in SVG.
-	if strings.Contains(svg, "notify-service") {
-		t.Errorf("app id must not be embedded in the line chart SVG: %s", svg)
+	// Hover points carry the per-bucket count in a native <title> tooltip.
+	if !strings.Contains(svg, "<circle") || !strings.Contains(svg, "notify-service · 5건</title>") {
+		t.Errorf("expected hover circles with count titles in SVG: %s", svg)
 	}
 }
 
-func TestBuildLineChartSingleDayNoDivByZero(t *testing.T) {
+func TestBuildLineChartEscapesAppIDInTitles(t *testing.T) {
+	// App ids reach the SVG only through the hover titles — they must be
+	// escaped there (defense in depth; ids come from the DB).
+	now := day(t, "2026-07-08")
+	series := []AppDayCount{
+		{AppID: "<evil&app>", Day: day(t, "2026-07-08"), Count: 1},
+	}
+	chart := buildLineChart(series, weekRange(t), now)
+	if chart == nil {
+		t.Fatal("expected a chart")
+	}
+	svg := string(chart.SVG)
+	if strings.Contains(svg, "<evil&app>") {
+		t.Errorf("raw app id leaked into SVG: %s", svg)
+	}
+	if !strings.Contains(svg, "&lt;evil&amp;app&gt;") {
+		t.Errorf("expected escaped app id in hover title: %s", svg)
+	}
+}
+
+func TestBuildLineChartHourlyBuckets(t *testing.T) {
+	// The 일 toggle buckets by hour: a point in the previous hour must land
+	// on the 24h axis.
+	cr := resolveChartRange("day")
+	if cr.Spec.Unit != "hour" || cr.Spec.Buckets != 24 {
+		t.Fatalf("day range spec changed: %+v", cr.Spec)
+	}
+	now := time.Date(2026, 7, 8, 15, 0, 0, 0, time.UTC)
+	series := []AppDayCount{
+		{AppID: "a1", Day: time.Date(2026, 7, 8, 14, 0, 0, 0, time.UTC), Count: 4},
+	}
+	chart := buildLineChart(series, cr, now)
+	if chart == nil {
+		t.Fatal("expected a chart for an in-window hourly point")
+	}
+	if !strings.Contains(string(chart.SVG), "14시 · a1 · 4건") {
+		t.Errorf("expected the hourly hover title, got: %s", chart.SVG)
+	}
+	// A point older than 24h stays off the chart.
+	stale := []AppDayCount{
+		{AppID: "a1", Day: time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC), Count: 9},
+	}
+	if got := buildLineChart(stale, cr, now); got != nil {
+		t.Fatalf("expected nil chart for out-of-window hourly point, got %+v", got)
+	}
+}
+
+func TestBuildLineChartMonthlyBuckets(t *testing.T) {
+	cr := resolveChartRange("year")
+	now := time.Date(2026, 7, 8, 15, 0, 0, 0, time.UTC)
+	series := []AppDayCount{
+		{AppID: "a1", Day: time.Date(2025, 9, 1, 0, 0, 0, 0, time.UTC), Count: 7},
+	}
+	chart := buildLineChart(series, cr, now)
+	if chart == nil {
+		t.Fatal("expected a chart for an in-window monthly point")
+	}
+	if !strings.Contains(string(chart.SVG), "2025년 9월 · a1 · 7건") {
+		t.Errorf("expected the monthly hover title, got: %s", chart.SVG)
+	}
+}
+
+func TestBuildLineChartSingleBucketNoDivByZero(t *testing.T) {
 	now := day(t, "2026-07-08")
 	series := []AppDayCount{
 		{AppID: "a1", Day: day(t, "2026-07-08"), Count: 0},
 	}
-	chart := buildLineChart(series, 1, now)
+	one := chartRange{Key: "one", Title: "1일", Spec: SeriesSpec{Unit: "day", Buckets: 1}}
+	chart := buildLineChart(series, one, now)
 	if chart == nil {
-		t.Fatal("expected a chart for days=1")
+		t.Fatal("expected a chart for a single bucket")
 	}
 	if strings.Contains(string(chart.SVG), "NaN") || strings.Contains(string(chart.SVG), "Inf") {
 		t.Errorf("SVG contains non-finite coordinates: %s", chart.SVG)
@@ -80,7 +169,7 @@ func TestBuildLineChartLegendRankedByVolume(t *testing.T) {
 		{AppID: "alpha", Day: day(t, "2026-07-08"), Count: 1},
 		{AppID: "zeta", Day: day(t, "2026-07-08"), Count: 2},
 	}
-	chart := buildLineChart(series, 7, now)
+	chart := buildLineChart(series, weekRange(t), now)
 	if chart == nil {
 		t.Fatal("expected a chart")
 	}
@@ -142,10 +231,10 @@ func TestSelectLineSeriesFoldsRest(t *testing.T) {
 func TestBuildLineChartFoldRendersMutedRestLine(t *testing.T) {
 	now := day(t, "2026-07-08")
 	var series []AppDayCount
-	for _, id := range []string{"a1", "a2", "a3", "a4", "a5", "a6"} {
+	for _, id := range []string{"app-one", "app-two", "app-three", "app-four", "app-five", "app-six"} {
 		series = append(series, AppDayCount{AppID: id, Day: day(t, "2026-07-08"), Count: 1})
 	}
-	chart := buildLineChart(series, 7, now)
+	chart := buildLineChart(series, weekRange(t), now)
 	if chart == nil {
 		t.Fatal("expected a chart")
 	}
@@ -155,10 +244,6 @@ func TestBuildLineChartFoldRendersMutedRestLine(t *testing.T) {
 	last := chart.Legend[len(chart.Legend)-1]
 	if last.Color != restLineColor {
 		t.Errorf("기타 legend should use the muted color %s, got %s", restLineColor, last.Color)
-	}
-	// App ids must still never appear raw in the SVG (only in the escaped legend).
-	if strings.Contains(string(chart.SVG), "a1") {
-		t.Errorf("app id leaked into SVG: %s", chart.SVG)
 	}
 }
 
@@ -186,61 +271,174 @@ func TestBuildKPIView(t *testing.T) {
 	}
 }
 
-func TestBuildPipelineFunnel(t *testing.T) {
-	if got := buildPipelineFunnel(nil); got != nil {
-		t.Fatalf("expected nil funnel for empty counts, got %+v", got)
+func TestBuildPipelineFlow(t *testing.T) {
+	if got := buildPipelineFlow(nil); got != nil {
+		t.Fatalf("expected nil flow for empty counts, got %+v", got)
 	}
-	f := buildPipelineFunnel([]StageCount{
+	f := buildPipelineFlow([]StageCount{
 		{Stage: "received", Count: 100},
 		{Stage: "validated", Count: 90},
 		{Stage: "delivered", Count: 80},
-		// dispatched intentionally missing → must render as a 0 bar.
+		// dispatched intentionally missing → must render as a 0 box.
 	})
 	if f == nil {
-		t.Fatal("expected a funnel")
+		t.Fatal("expected a flow")
 	}
-	if len(f.Bars) != len(funnelStageOrder) {
-		t.Fatalf("funnel must have one bar per pipeline stage, got %d", len(f.Bars))
+	if len(f.Stages) != len(funnelStageOrder) {
+		t.Fatalf("flow must have one box per pipeline stage, got %d", len(f.Stages))
 	}
-	// Bars follow funnelStageOrder regardless of input order.
+	// Boxes follow funnelStageOrder regardless of input order; the arrow
+	// carries the delta to the NEXT stage — a window edge can make the next
+	// stage larger, shown as +N with no alert.
 	want := []struct {
 		stage string
 		count int
-		width string
+		drop  string
+		alert bool
 	}{
-		{"received", 100, "100.0"},
-		{"validated", 90, "90.0"},
-		{"dispatched", 0, "0"},
-		{"delivered", 80, "80.0"},
+		{"received", 100, "-10", true},
+		{"validated", 90, "-90", true},
+		{"dispatched", 0, "+80", false},
+		{"delivered", 80, "", false},
 	}
 	for i, w := range want {
-		b := f.Bars[i]
-		if b.Stage != w.stage || b.Count != w.count || b.WidthPct != w.width {
-			t.Errorf("bar %d = %+v, want stage=%s count=%d width=%s", i, b, w.stage, w.count, w.width)
+		s := f.Stages[i]
+		if s.Name != w.stage || s.Count != w.count || s.Drop != w.drop || s.DropAlert != w.alert {
+			t.Errorf("stage %d = %+v, want %+v", i, s, w)
 		}
 	}
 }
 
-func TestBuildFailureCauses(t *testing.T) {
-	if got := buildFailureCauses(nil); got != nil {
+func TestBuildPipelineFlowZeroDropNotAlerted(t *testing.T) {
+	f := buildPipelineFlow([]StageCount{
+		{Stage: "received", Count: 5},
+		{Stage: "validated", Count: 5},
+		{Stage: "dispatched", Count: 5},
+		{Stage: "delivered", Count: 5},
+	})
+	if f == nil {
+		t.Fatal("expected a flow")
+	}
+	for _, s := range f.Stages[:3] {
+		if s.Drop != "-0" || s.DropAlert {
+			t.Errorf("lossless stage %s should show a quiet -0, got %+v", s.Name, s)
+		}
+	}
+}
+
+func TestBuildFailurePie(t *testing.T) {
+	if got := buildFailurePie(nil); got != nil {
 		t.Fatalf("expected nil view for empty causes, got %+v", got)
 	}
-	v := buildFailureCauses([]ErrorCodeCount{
-		{Code: "unknown_bearer", Count: 100}, // largest → 100%
-		{Code: "unknown_recipient", Count: 40},
-		{Code: "capability_denied", Count: 1}, // 1% of 100 → floored to 2%
+	v := buildFailurePie([]ErrorCodeCount{
+		{Code: "unknown_bearer", Count: 6},
+		{Code: "unknown_recipient", Count: 2},
 	})
-	if v == nil || len(v.Causes) != 3 {
-		t.Fatalf("expected 3 cause bars, got %+v", v)
+	if v == nil || len(v.Legend) != 2 {
+		t.Fatalf("expected 2 legend rows, got %+v", v)
 	}
-	if v.Causes[0].WidthPct != "100.0" {
-		t.Errorf("largest cause should be 100%%, got %s", v.Causes[0].WidthPct)
+	if v.Total != 8 {
+		t.Errorf("Total = %d, want 8", v.Total)
 	}
-	if v.Causes[2].WidthPct != "2.0" {
-		t.Errorf("sliver cause should floor to 2%%, got %s", v.Causes[2].WidthPct)
+	if v.Legend[0].Code != "unknown_bearer" || v.Legend[0].Pct != "75%" {
+		t.Errorf("largest cause should lead with 75%%, got %+v", v.Legend[0])
 	}
-	if v.Causes[0].Code != "unknown_bearer" {
-		t.Errorf("ranked order not preserved: %+v", v.Causes)
+	if v.Legend[1].Pct != "25%" {
+		t.Errorf("second cause pct = %q, want 25%%", v.Legend[1].Pct)
+	}
+	svg := string(v.SVG)
+	// Donut slices are stroke-dasharray circles with hover titles.
+	if !strings.Contains(svg, "stroke-dasharray") {
+		t.Errorf("expected dasharray slices in SVG: %s", svg)
+	}
+	if !strings.Contains(svg, "unknown_bearer · 6건 (75%)") {
+		t.Errorf("expected slice hover title in SVG: %s", svg)
+	}
+}
+
+func TestBuildFailurePieFoldsSmallCauses(t *testing.T) {
+	var counts []ErrorCodeCount
+	for i := 0; i < 7; i++ {
+		counts = append(counts, ErrorCodeCount{Code: fmt.Sprintf("code_%d", i), Count: 10 - i})
+	}
+	v := buildFailurePie(counts)
+	if v == nil {
+		t.Fatal("expected a view")
+	}
+	if len(v.Legend) != pieFoldAfter+1 {
+		t.Fatalf("expected %d slices (top %d + 기타), got %d", pieFoldAfter+1, pieFoldAfter, len(v.Legend))
+	}
+	last := v.Legend[len(v.Legend)-1]
+	if last.Code != "기타 2종" {
+		t.Errorf("fold label = %q, want %q", last.Code, "기타 2종")
+	}
+	if last.Count != 9 { // 5+4 (code_5, code_6)
+		t.Errorf("fold count = %d, want 9", last.Count)
+	}
+	// Exactly pieFoldAfter+1 causes → no fold (a "기타 1종" slice is pointless).
+	v6 := buildFailurePie(counts[:pieFoldAfter+1])
+	if len(v6.Legend) != pieFoldAfter+1 || v6.Legend[pieFoldAfter].Code != "code_5" {
+		t.Errorf("no fold expected at %d causes: %+v", pieFoldAfter+1, v6.Legend)
+	}
+}
+
+func TestBuildFailurePieEscapesCode(t *testing.T) {
+	v := buildFailurePie([]ErrorCodeCount{{Code: "<script>x", Count: 1}})
+	if v == nil {
+		t.Fatal("expected a view")
+	}
+	svg := string(v.SVG)
+	if strings.Contains(svg, "<script>") {
+		t.Errorf("raw error code leaked into SVG: %s", svg)
+	}
+	if !strings.Contains(svg, "&lt;script&gt;") {
+		t.Errorf("expected escaped error code in slice title: %s", svg)
+	}
+}
+
+func TestBuildLatencyStrip(t *testing.T) {
+	if got := buildLatencyStrip(nil, LatencyStats{}); got != nil {
+		t.Fatalf("expected nil strip when no trace completed, got %+v", got)
+	}
+	v := buildLatencyStrip(
+		[]float64{0.004, 0.007, 0.012},
+		LatencyStats{Count: 3, P50: 0.007, P95: 0.012, Max: 0.012},
+	)
+	if v == nil {
+		t.Fatal("expected a strip view")
+	}
+	if v.P50 != "7ms" || v.P95 != "12ms" || v.Max != "12ms" || v.Count != 3 {
+		t.Errorf("unexpected strip stats: %+v", v)
+	}
+	svg := string(v.SVG)
+	if !strings.Contains(svg, "SLO 200ms") {
+		t.Errorf("expected the SLO reference line label: %s", svg)
+	}
+	if !strings.Contains(svg, "p50 7ms") {
+		t.Errorf("expected the p50 marker label: %s", svg)
+	}
+	// One hover dot per sample, each with its own value tooltip.
+	if got := strings.Count(svg, "<circle"); got != 3 {
+		t.Errorf("expected 3 dots, got %d: %s", got, svg)
+	}
+	if !strings.Contains(svg, "<title>4ms</title>") {
+		t.Errorf("expected per-dot value titles: %s", svg)
+	}
+}
+
+func TestBuildLatencyStripSlowSampleKeepsSLOVisible(t *testing.T) {
+	// A sample far beyond the SLO must stretch the axis, not push the SLO
+	// line off-plot.
+	v := buildLatencyStrip([]float64{1.2}, LatencyStats{Count: 1, P50: 1.2, P95: 1.2, Max: 1.2})
+	if v == nil {
+		t.Fatal("expected a strip view")
+	}
+	svg := string(v.SVG)
+	if !strings.Contains(svg, "SLO 200ms") {
+		t.Errorf("SLO line must stay on the axis: %s", svg)
+	}
+	if strings.Contains(svg, "NaN") || strings.Contains(svg, "Inf") {
+		t.Errorf("SVG contains non-finite coordinates: %s", svg)
 	}
 }
 
@@ -257,8 +455,8 @@ func TestFormatLatency(t *testing.T) {
 		{45, "45.0s"},
 		{75, "1m 15s"},
 		{600, "10m 0s"},
-		{0.9996, "1.0s"}, // rounds up across the ms→s boundary, not "1000ms"
-		{59.96, "1m 0s"}, // rounds up across the s→m boundary, not "60.0s"
+		{0.9996, "1.0s"},  // rounds up across the ms→s boundary, not "1000ms"
+		{59.96, "1m 0s"},  // rounds up across the s→m boundary, not "60.0s"
 		{0.9994, "999ms"}, // stays in ms just below the boundary
 	}
 	for _, tc := range cases {
@@ -268,24 +466,12 @@ func TestFormatLatency(t *testing.T) {
 	}
 }
 
-func TestBuildLatencyView(t *testing.T) {
-	if got := buildLatencyView(LatencyStats{}); got != nil {
-		t.Fatalf("expected nil view when no trace completed, got %+v", got)
-	}
-	v := buildLatencyView(LatencyStats{Count: 75, P50: 0.004, P95: 0.008, Max: 0.013})
-	if v == nil {
-		t.Fatal("expected a view")
-	}
-	if v.P50 != "4ms" || v.P95 != "8ms" || v.Max != "13ms" || v.Count != 75 {
-		t.Errorf("unexpected latency view: %+v", v)
-	}
-}
-
-func TestDashboardRendersLatency(t *testing.T) {
+func TestDashboardRendersLatencyStrip(t *testing.T) {
 	body := dashboardPage(t, &fakeStore{
-		latency: LatencyStats{Count: 75, P50: 0.004, P95: 0.008, Max: 0.013},
+		latency:        LatencyStats{Count: 3, P50: 0.004, P95: 0.008, Max: 0.013},
+		latencySamples: []float64{0.004, 0.008, 0.013},
 	})
-	for _, want := range []string{"전달 지연", "전달 완료 기준", "p50 (중앙값)", "4ms", "8ms", "완료 표본 수"} {
+	for _, want := range []string{"전달 지연", "received→delivered", "p50 4ms", "p95 8ms", "표본 3건", "SLO 200ms"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("dashboard missing latency %q", want)
 		}
@@ -293,19 +479,27 @@ func TestDashboardRendersLatency(t *testing.T) {
 }
 
 func TestDashboardLatencyDegradesAndEmpty(t *testing.T) {
-	// Error → banner, never a false "0ms".
+	// Percentile error → banner, never a false "0ms".
 	body := dashboardPage(t, &fakeStore{latencyErr: errors.New("boom")})
 	if !strings.Contains(body, "전달 지연 지표를 불러오지 못했습니다") {
 		t.Error("expected the latency error banner")
 	}
-	if strings.Contains(body, "p50 (중앙값)") {
-		t.Error("latency card must not render when the query failed")
+	if strings.Contains(body, "표본") {
+		t.Error("strip caption must not render when the percentile query failed")
 	}
-	// Empty (Count 0) → an explicit "no completions" note, not a 0ms row and
-	// not a silently absent card (an operator must be able to tell the two apart).
+	// Sample-query error degrades the same card the same way.
+	sampleErr := dashboardPage(t, &fakeStore{
+		latency:    LatencyStats{Count: 3, P50: 0.004},
+		samplesErr: errors.New("boom"),
+	})
+	if !strings.Contains(sampleErr, "전달 지연 지표를 불러오지 못했습니다") {
+		t.Error("expected the latency error banner when only the sample query fails")
+	}
+	// Empty (no samples) → an explicit "no completions" note, not an empty
+	// plot and not a silently absent card.
 	empty := dashboardPage(t, &fakeStore{})
-	if strings.Contains(empty, "p50 (중앙값)") {
-		t.Error("latency percentiles must not render for an empty window")
+	if strings.Contains(empty, "SLO 200ms") {
+		t.Error("strip must not render for an empty window")
 	}
 	if !strings.Contains(empty, "최근 24시간 완료된 전달이 없습니다") {
 		t.Error("empty window should show the explicit no-completions note")
@@ -315,6 +509,13 @@ func TestDashboardLatencyDegradesAndEmpty(t *testing.T) {
 // dashboardPage logs in against a handler wired to store and returns the
 // rendered dashboard body.
 func dashboardPage(t *testing.T, store Store) string {
+	t.Helper()
+	return dashboardPageAt(t, store, "/")
+}
+
+// dashboardPageAt is dashboardPage with a caller-chosen path (range toggle
+// tests hit /?range=…).
+func dashboardPageAt(t *testing.T, store Store, path string) string {
 	t.Helper()
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -328,7 +529,7 @@ func dashboardPage(t *testing.T, store Store) string {
 	}
 	cookies := loginSession(t, handler, cfg)
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, path, nil)
 	for _, c := range cookies {
 		req.AddCookie(c)
 	}
@@ -340,22 +541,36 @@ func dashboardPage(t *testing.T, store Store) string {
 	return rec.Body.String()
 }
 
-func TestDashboardRendersKPIAndFailures(t *testing.T) {
-	uid := int64(42)
+func TestDashboardRendersMetricCards(t *testing.T) {
 	body := dashboardPage(t, &fakeStore{
-		kpi: KPICounts{Received: 12, Delivered: 11, Failed: 1},
-		failures: []FailureRow{
-			{Stage: "denied", AppID: "ci-notifier", RecipientUserID: &uid, ErrorCode: "capability_denied", TraceID: "tr-1"},
-		},
+		apps: map[string]App{"a1": {ID: "a1"}},
+		kpi:  KPICounts{Received: 12, Delivered: 11, Failed: 1},
 	})
-	for _, want := range []string{"수신 · 24h", ">12<", ">11<", "92%", "capability_denied", "전달 현황에서 자세히"} {
+	// 요청사항의 4개 메트릭: 앱(활성/등록), API 키(활성), 사용자, 성공률.
+	for _, want := range []string{"활성 / 등록", "API 키", "사용자", "전달 성공률", "92%", "11/12건"} {
 		if !strings.Contains(body, want) {
-			t.Errorf("dashboard missing %q", want)
+			t.Errorf("dashboard missing metric %q", want)
 		}
+	}
+	// The recent-failures table was removed from the dashboard (요청사항).
+	if strings.Contains(body, "최근 실패") {
+		t.Error("dashboard must not render the removed recent-failures section")
 	}
 }
 
-func TestDashboardRendersFunnelAndCauses(t *testing.T) {
+func TestDashboardKPIErrorShowsFailedRateCard(t *testing.T) {
+	body := dashboardPage(t, &fakeStore{kpiErr: errors.New("boom")})
+	// The rate card must state the lookup failed, not render a fake rate.
+	if !strings.Contains(body, "전달 성공률 · 조회 실패") {
+		t.Error("expected the rate card's failure state")
+	}
+	// The other metric cards still render — independent degradation.
+	if !strings.Contains(body, "활성 / 등록") {
+		t.Error("resource metric cards should survive a KPI query failure")
+	}
+}
+
+func TestDashboardRendersPipelineAndPie(t *testing.T) {
 	body := dashboardPage(t, &fakeStore{
 		pipeline: []StageCount{
 			{Stage: "received", Count: 40},
@@ -368,14 +583,17 @@ func TestDashboardRendersFunnelAndCauses(t *testing.T) {
 			{Code: "unknown_recipient", Count: 2},
 		},
 	})
-	for _, want := range []string{"파이프라인 퍼널", "전체 앱 합산", "실패 원인 분포", "unknown_bearer", "unknown_recipient"} {
+	for _, want := range []string{
+		"파이프라인", "단계별 이탈", `class="pipe-box pipe-received"`, ">40<", "-2",
+		"실패 원인", "unknown_bearer", "unknown_recipient", "75%",
+	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("dashboard missing %q", want)
 		}
 	}
 }
 
-func TestDashboardFunnelAndCausesDegradeIndependently(t *testing.T) {
+func TestDashboardPipelineAndPieDegradeIndependently(t *testing.T) {
 	errBoom := errors.New("boom")
 	body := dashboardPage(t, &fakeStore{
 		kpi:         KPICounts{Received: 5, Delivered: 5},
@@ -383,50 +601,61 @@ func TestDashboardFunnelAndCausesDegradeIndependently(t *testing.T) {
 		causesErr:   errBoom,
 	})
 	if !strings.Contains(body, "파이프라인 집계를 불러오지 못했습니다") {
-		t.Error("expected the funnel error banner")
+		t.Error("expected the pipeline error banner")
 	}
 	if !strings.Contains(body, "실패 원인 집계를 불러오지 못했습니다") {
 		t.Error("expected the failure-cause error banner")
 	}
-	// The KPI row is unaffected — independent degradation.
-	if !strings.Contains(body, "수신 · 24h") {
-		t.Error("KPI row should still render when only the diagnostics queries fail")
+	// The metric row is unaffected — independent degradation.
+	if !strings.Contains(body, "전달 성공률") {
+		t.Error("metric cards should still render when only the diagnostics queries fail")
 	}
 }
 
-func TestDashboardEmptyFunnelAndCausesShowNotes(t *testing.T) {
+func TestDashboardEmptyPipelineAndPieShowNotes(t *testing.T) {
 	body := dashboardPage(t, &fakeStore{})
 	if !strings.Contains(body, "최근 24시간 파이프라인 트래픽이 없습니다") {
-		t.Error("expected the empty-funnel note")
+		t.Error("expected the empty-pipeline note")
 	}
-	// Empty causes render the positive no-failures badge, not a broken bar list.
-	if strings.Contains(body, `class="cbar"`) {
-		t.Error("no failure-cause bars should render for an empty window")
-	}
-}
-
-func TestDashboardKPIErrorDoesNotRenderZeros(t *testing.T) {
-	errBoom := errors.New("boom")
-	body := dashboardPage(t, &fakeStore{kpiErr: errBoom, failuresErr: errBoom})
-	if !strings.Contains(body, "전달 지표를 불러오지 못했습니다") {
-		t.Error("expected the KPI error banner")
-	}
-	if strings.Contains(body, "수신 · 24h") {
-		t.Error("KPI cards must not render (as zeros) when the query failed")
-	}
-	// The failures card must warn rather than claim "no failures".
-	if strings.Contains(body, "실패 없음") {
-		t.Error("failures card must not claim success when the query failed")
-	}
-	if !strings.Contains(body, "실패 목록을 불러오지 못했습니다") {
-		t.Error("expected the failures error banner")
+	if !strings.Contains(body, "최근 24시간 집계된 실패가 없습니다") {
+		t.Error("expected the empty-causes note")
 	}
 }
 
-func TestDashboardNoFailuresShowsPositiveRow(t *testing.T) {
+func TestDashboardRangeToggle(t *testing.T) {
+	// Default is the 일 (hourly) view; the toggle renders all four ranges.
 	body := dashboardPage(t, &fakeStore{})
-	if !strings.Contains(body, "최근 24시간 실패 없음") {
-		t.Error("expected the explicit no-failures row")
+	if !strings.Contains(body, "최근 24시간 · 시간별") {
+		t.Error("expected the default hourly chart caption")
+	}
+	for _, key := range []string{"day", "week", "month", "year"} {
+		if !strings.Contains(body, "/?range="+key) {
+			t.Errorf("missing range toggle link for %q", key)
+		}
+	}
+	// ?range=year switches the caption; garbage falls back to the default.
+	year := dashboardPageAt(t, &fakeStore{}, "/?range=year")
+	if !strings.Contains(year, "최근 12개월 · 월별") {
+		t.Error("expected the yearly chart caption")
+	}
+	garbage := dashboardPageAt(t, &fakeStore{}, "/?range=%22%3E%3Cscript%3E")
+	if !strings.Contains(garbage, "최근 24시간 · 시간별") {
+		t.Error("garbage range should fall back to the default caption")
+	}
+	if strings.Contains(garbage, "<script") {
+		t.Error("range param must never be echoed raw")
+	}
+}
+
+func TestDashboardChartErrorShowsBannerNotEmptyNote(t *testing.T) {
+	// Degrade contract: a failed RequestBuckets query must render as a
+	// warning banner, never as the empty-state "no data" note.
+	body := dashboardPage(t, &fakeStore{bucketsErr: errors.New("boom")})
+	if !strings.Contains(body, "요청 추이를 불러오지 못했습니다") {
+		t.Error("expected the chart error banner")
+	}
+	if strings.Contains(body, "해당 기간 수집된 요청 데이터가 없습니다") {
+		t.Error("chart error must not render as the empty-data note")
 	}
 }
 

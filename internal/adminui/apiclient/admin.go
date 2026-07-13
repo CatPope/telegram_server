@@ -58,6 +58,12 @@ func (c *Client) DeleteApp(ctx context.Context, id string) error {
 	return c.doAdmin(ctx, http.MethodDelete, "/admin/apps/"+url.PathEscape(id), nil)
 }
 
+// PurgeApp calls DELETE /admin/apps/{id}/purge (hard delete: the app row
+// and its cascaded keys/capabilities/subscriptions are removed).
+func (c *Client) PurgeApp(ctx context.Context, id string) error {
+	return c.doAdmin(ctx, http.MethodDelete, "/admin/apps/"+url.PathEscape(id)+"/purge", nil)
+}
+
 // PatchUserGrade calls PATCH /admin/users/{telegram_id}.
 func (c *Client) PatchUserGrade(ctx context.Context, telegramID int64, grade string) error {
 	body := struct {

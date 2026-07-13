@@ -5,19 +5,66 @@
 <div class="banner banner-warn">DB 미연결 — DATABASE_URL이 설정되어야 전달 현황을 집계할 수 있습니다.</div>
 {{else}}
 
-<div class="toolbar">
-  <span class="tlabel">기간</span>
-  <span class="seg">
-    <a href="/delivery?window=7d" class="{{if eq $d.Window "7d"}}on{{end}}">7일</a>
-    <a href="/delivery?window=24h" class="{{if eq $d.Window "24h"}}on{{end}}">24시간</a>
-  </span>
-  <span class="spacer"></span>
-  <span class="tlabel">received → validated → dispatched → delivered</span>
+{{/* 필터 — 기간(드롭다운) · 앱 · 유형(stage) · 에러 유형 */}}
+<div class="card">
+  <form method="get" action="/delivery" class="filter-form">
+    <div style="width:130px">
+      <label class="field" for="window">기간</label>
+      <select id="window" name="window">
+        {{range $d.Windows}}<option value="{{.Key}}"{{if .On}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select>
+    </div>
+    <div style="min-width:170px">
+      <label class="field" for="app">앱</label>
+      <select id="app" name="app" class="mono">
+        <option value="">전체</option>
+        {{$app := $d.AppFilter}}
+        {{range $d.AppOptions}}<option value="{{.}}"{{if eq . $app}} selected{{end}}>{{.}}</option>{{end}}
+      </select>
+    </div>
+    <div style="min-width:170px">
+      <label class="field" for="stage">유형 (stage)</label>
+      <select id="stage" name="stage" class="mono">
+        <option value="">전체</option>
+        {{$stage := $d.StageFilter}}
+        {{range $d.StageOptions}}<option value="{{.}}"{{if eq . $stage}} selected{{end}}>{{.}}</option>{{end}}
+      </select>
+    </div>
+    <div style="min-width:190px">
+      <label class="field" for="error">에러 유형</label>
+      <select id="error" name="error" class="mono">
+        <option value="">전체</option>
+        {{$err := $d.ErrorFilter}}
+        {{range $d.ErrorOptions}}<option value="{{.}}"{{if eq . $err}} selected{{end}}>{{.}}</option>{{end}}
+      </select>
+    </div>
+    <button type="submit" class="btn btn-primary">적용</button>
+    {{if $d.Filtered}}<a class="rowlink" href="/delivery?window={{$d.Window}}" style="align-self:center">필터 초기화</a>{{end}}
+  </form>
+</div>
+
+{{/* 시각화 — 필터 적용된 일자별 추이 */}}
+<div class="card">
+  <div class="card-head">
+    <h2 style="font-size:15px">전달 추이 <span class="caption" style="display:inline">{{$d.WindowLabel}} · 일별{{if $d.Filtered}} · 필터 적용됨{{end}}</span></h2>
+    {{if $d.Trend}}
+    <div class="legend">
+      {{range $d.Trend.Legend}}<span><span class="sw" style="background:{{.Color}}"></span>{{.Label}}</span>{{end}}
+    </div>
+    {{end}}
+  </div>
+  {{if $d.TrendErr}}
+  <div class="banner banner-warn" style="margin:12px 0 0">추이 집계를 불러오지 못했습니다</div>
+  {{else if $d.Trend}}
+  <div class="trend-chart">{{$d.Trend.SVG}}</div>
+  {{else}}
+  <p class="caption" style="margin-top:12px">{{$d.WindowLabel}}간 조건에 맞는 이벤트가 없습니다.</p>
+  {{end}}
 </div>
 
 <div class="card">
   <h2>앱별 전달 퍼널</h2>
-  <p class="caption">{{$d.WindowLabel}} · 성공률 = delivered / received</p>
+  <p class="caption">{{$d.WindowLabel}}{{if $d.AppFilter}} · 앱 {{$d.AppFilter}}{{end}} · 성공률 = delivered / received (유형·에러 필터는 추이/실패 목록에만 적용)</p>
   {{if $d.Funnels}}
     {{range $d.Funnels}}
     <div class="funnel">
@@ -46,7 +93,7 @@
 <div class="card table-card">
   <div style="padding:20px 20px 0">
     <h2>최근 실패</h2>
-    <p class="caption">denied · telegram_auth_failed · bot_not_admin · intrusion_* — {{$d.WindowLabel}} 최신 30건</p>
+    <p class="caption">denied · telegram_auth_failed · bot_not_admin · intrusion_* — {{$d.WindowLabel}} 최신 30건{{if $d.Filtered}} · 필터 적용됨{{end}}</p>
   </div>
   {{if $d.FailuresErr}}
     <div style="padding:0 20px 20px"><div class="banner banner-error" style="margin:0">실패 목록을 불러오지 못했습니다</div></div>
@@ -70,7 +117,7 @@
   </table>
   {{else}}
     <div style="padding:0 20px 20px">
-      <span class="badge badge-green">✓ 최근 실패가 없습니다</span>
+      <span class="badge badge-green">✓ 조건에 맞는 실패가 없습니다</span>
     </div>
   {{end}}
 </div>

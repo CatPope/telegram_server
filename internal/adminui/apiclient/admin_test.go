@@ -99,6 +99,22 @@ func TestDeleteAppSuccess(t *testing.T) {
 	}
 }
 
+func TestPurgeAppSuccess(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/admin/apps/ci-notifier/purge" {
+			t.Errorf("got %s %s", r.Method, r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"ci-notifier","purged":true}`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "test-key")
+	if err := c.PurgeApp(context.Background(), "ci-notifier"); err != nil {
+		t.Fatalf("PurgeApp: %v", err)
+	}
+}
+
 func TestPatchUserGradeSuccess(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPatch || r.URL.Path != "/admin/users/123456789" {

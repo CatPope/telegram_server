@@ -56,7 +56,34 @@
       <button type="submit" class="btn btn-outline">앱 다시 활성화</button>
     </form>
     {{end}}
+    {{if .App}}
+    <a class="btn btn-danger" href="#delete-app">앱 삭제</a>
+    {{end}}
   </div>
 </div>
+
+{{/* 삭제 재확인 모달 (CSS :target — JS 금지). 앱 ID를 다시 입력해야
+     서버가 삭제를 실행한다 (confirm_id 불일치 시 거부). */}}
+{{if .App}}
+<div class="modal" id="delete-app">
+  <div class="dialog">
+    <a class="close" href="#">×</a>
+    <h3>앱 완전 삭제</h3>
+    <p style="color:#6b7280;font-size:14px;margin:0 0 14px">
+      이 작업은 <b>되돌릴 수 없습니다</b>. 앱과 해당 앱의 API 키·capability·구독이 모두 삭제됩니다
+      (감사 로그는 보존). 계속하려면 앱 ID <b class="mono">{{.App.ID}}</b>를 아래에 입력하세요.
+    </p>
+    <form method="post" action="/apps/{{.AppID}}/delete" style="margin:0">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <label class="field" for="confirm_id">앱 ID 확인</label>
+      <input type="text" id="confirm_id" name="confirm_id" class="mono" placeholder="{{.App.ID}}" autocomplete="off" required>
+      <div class="row-actions">
+        <a class="btn btn-outline" href="#">취소</a>
+        <button type="submit" class="btn btn-danger">영구 삭제</button>
+      </div>
+    </form>
+  </div>
+</div>
+{{end}}
 {{end}}
 {{end}}

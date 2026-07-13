@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/http"
+	"slices"
+	"sort"
 	"strconv"
 	"time"
 
@@ -37,8 +39,14 @@ var auditStages = []string{
 	"key_revoked",
 }
 
+// auditLimitOptions is the limit dropdown — the server accepts 1~500 and
+// defaults to 50, so the dropdown offers the useful steps of that range.
+var auditLimitOptions = []string{"50", "100", "200", "500"}
+
 // AuditFilters echoes the operator's GET query back into the filter form
 // so a submitted search keeps its inputs visible alongside the results.
+// Since/Until hold the date-picker values (2006-01-02); they are converted
+// to the RFC3339 instants the /admin API expects only when querying.
 type AuditFilters struct {
 	Limit   string
 	Since   string
@@ -46,6 +54,35 @@ type AuditFilters struct {
 	TraceID string
 	AppID   string
 	Stage   string
+}
+
+// auditDateToRFC3339 converts a date-picker value (2006-01-02) to the
+// RFC3339 boundary the /admin API expects — start of day for since, next
+// midnight for until, both UTC to match the stored timestamps. The server
+// compares at <= until, so next-midnight keeps every fractional-second
+// event of the selected day (23:59:59.x) at the cost of also matching an
+// event landing exactly on the next midnight instant — the lesser error.
+// Anything that isn't a plain date (an old RFC3339 bookmark, garbage)
+// passes through untouched: the server stays the single validator.
+func auditDateToRFC3339(v string, endOfDay bool) string {
+	t, err := time.Parse("2006-01-02", v)
+	if err != nil || v == "" {
+		return v
+	}
+	if endOfDay {
+		t = t.AddDate(0, 0, 1)
+	}
+	return t.UTC().Format(time.RFC3339)
+}
+
+// normalizeAuditDate collapses a legacy RFC3339 filter value (old bookmark)
+// to its date part so the date input can display it — otherwise the browser
+// renders an empty box while the filter silently stays active.
+func normalizeAuditDate(v string) string {
+	if t, err := time.Parse(time.RFC3339, v); err == nil {
+		return t.UTC().Format("2006-01-02")
+	}
+	return v
 }
 
 // AuditDisplayRow is an AuditRow flattened for the template: nullable
@@ -99,8 +136,8 @@ func (s *Server) handleAuditPage(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	filters := AuditFilters{
 		Limit:   q.Get("limit"),
-		Since:   q.Get("since"),
-		Until:   q.Get("until"),
+		Since:   normalizeAuditDate(q.Get("since")),
+		Until:   normalizeAuditDate(q.Get("until")),
 		TraceID: q.Get("trace_id"),
 		AppID:   q.Get("app_id"),
 		Stage:   q.Get("stage"),
@@ -116,10 +153,29 @@ func (s *Server) auditPageData(r *http.Request, filters AuditFilters) pageData {
 	data.AuditFilters = filters
 	data.AuditStages = auditStages
 
+	// Dropdown options. The app list degrades quietly (nil store or a
+	// failed lookup → the template falls back to a text input); a limit
+	// from an old URL that isn't a dropdown step stays selectable.
+	data.AuditLimits = auditLimitOptions
+	if filters.Limit != "" && !slices.Contains(data.AuditLimits, filters.Limit) {
+		data.AuditLimits = append([]string{filters.Limit}, data.AuditLimits...)
+	}
+	if s.store != nil {
+		if apps, err := s.store.ListApps(r.Context()); err == nil {
+			for _, a := range apps {
+				data.AuditAppOptions = append(data.AuditAppOptions, a.ID)
+			}
+			if filters.AppID != "" && !slices.Contains(data.AuditAppOptions, filters.AppID) {
+				data.AuditAppOptions = append(data.AuditAppOptions, filters.AppID)
+				sort.Strings(data.AuditAppOptions)
+			}
+		}
+	}
+
 	rows, err := s.client.SearchAudit(r.Context(), apiclient.AuditSearchParams{
 		Limit:   filters.Limit,
-		Since:   filters.Since,
-		Until:   filters.Until,
+		Since:   auditDateToRFC3339(filters.Since, false),
+		Until:   auditDateToRFC3339(filters.Until, true),
 		TraceID: filters.TraceID,
 		AppID:   filters.AppID,
 		Stage:   filters.Stage,

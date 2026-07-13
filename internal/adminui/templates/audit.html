@@ -32,25 +32,36 @@
         {{end}}
       </select>
     </div>
-    <div style="min-width:150px">
+    <div style="min-width:160px">
       <label class="field" for="app_id">app_id</label>
+      {{if .AuditAppOptions}}
+      <select id="app_id" name="app_id" class="mono">
+        <option value="">전체</option>
+        {{$app := .AuditFilters.AppID}}
+        {{range .AuditAppOptions}}<option value="{{.}}"{{if eq . $app}} selected{{end}}>{{.}}</option>{{end}}
+      </select>
+      {{else}}
       <input type="text" id="app_id" name="app_id" class="mono" value="{{.AuditFilters.AppID}}" placeholder="전체">
+      {{end}}
     </div>
     <div style="min-width:150px">
       <label class="field" for="trace_id">trace_id</label>
       <input type="text" id="trace_id" name="trace_id" class="mono" value="{{.AuditFilters.TraceID}}" placeholder="전체">
     </div>
-    <div style="width:90px">
+    <div style="width:100px">
       <label class="field" for="limit">limit</label>
-      <input type="text" id="limit" name="limit" value="{{.AuditFilters.Limit}}" inputmode="numeric" placeholder="50">
+      <select id="limit" name="limit">
+        {{$limit := .AuditFilters.Limit}}
+        {{range .AuditLimits}}<option value="{{.}}"{{if eq . $limit}} selected{{end}}>{{.}}</option>{{end}}
+      </select>
     </div>
-    <div style="min-width:180px">
-      <label class="field" for="since">since (RFC3339)</label>
-      <input type="text" id="since" name="since" class="mono" value="{{.AuditFilters.Since}}" placeholder="2026-07-06T00:00:00Z">
+    <div style="min-width:160px">
+      <label class="field" for="since">시작일 (since)</label>
+      <input type="date" id="since" name="since" class="mono" value="{{.AuditFilters.Since}}">
     </div>
-    <div style="min-width:180px">
-      <label class="field" for="until">until (RFC3339)</label>
-      <input type="text" id="until" name="until" class="mono" value="{{.AuditFilters.Until}}" placeholder="전체">
+    <div style="min-width:160px">
+      <label class="field" for="until">종료일 (until)</label>
+      <input type="date" id="until" name="until" class="mono" value="{{.AuditFilters.Until}}">
     </div>
     <button type="submit" class="btn btn-primary">검색</button>
   </form>

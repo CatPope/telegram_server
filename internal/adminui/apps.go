@@ -87,6 +87,10 @@ func (s *Server) handleAppsList(w http.ResponseWriter, r *http.Request) {
 		data.StatusFilter = "all"
 	}
 
+	if purged := r.URL.Query().Get("purged"); purged != "" {
+		data.Success = "앱 '" + purged + "'이(가) 완전히 삭제되었습니다"
+	}
+
 	if s.store == nil {
 		data.DBUnavailable = true
 		s.render(w, "apps_list.html", data)
@@ -236,6 +240,22 @@ func (s *Server) handleAppPatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/apps/"+id+"?saved=1", http.StatusSeeOther)
+}
+
+// handleAppDelete permanently removes an app (DELETE /admin/apps/{id}/purge).
+// 요청사항의 재확인: the modal form requires the operator to retype the app
+// id (confirm_id) — a mismatch re-renders with an error and deletes nothing.
+func (s *Server) handleAppDelete(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if r.FormValue("confirm_id") != id {
+		s.renderAppDetailError(w, r, id, "확인 입력이 앱 ID와 일치하지 않아 삭제하지 않았습니다")
+		return
+	}
+	if err := s.client.PurgeApp(r.Context(), id); err != nil {
+		s.renderAppDetailError(w, r, id, friendlyAPIError(err))
+		return
+	}
+	http.Redirect(w, r, "/apps?purged="+url.QueryEscape(id), http.StatusSeeOther)
 }
 
 func (s *Server) handleAppDeactivate(w http.ResponseWriter, r *http.Request) {

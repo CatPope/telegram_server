@@ -69,6 +69,107 @@ func TestAuditPagePassesFiltersAndRendersRows(t *testing.T) {
 	}
 }
 
+func TestAuditDateToRFC3339(t *testing.T) {
+	cases := []struct {
+		in       string
+		endOfDay bool
+		want     string
+	}{
+		{"2026-07-06", false, "2026-07-06T00:00:00Z"},
+		// until is next midnight: the server compares at <= until, and
+		// 23:59:59Z would drop the day's fractional-second tail.
+		{"2026-07-06", true, "2026-07-07T00:00:00Z"},
+		// Non-date values pass through untouched — the server stays the
+		// single validator (old RFC3339 bookmarks keep working).
+		{"2026-07-06T12:00:00Z", false, "2026-07-06T12:00:00Z"},
+		{"nonsense", true, "nonsense"},
+		{"", false, ""},
+	}
+	for _, tc := range cases {
+		if got := auditDateToRFC3339(tc.in, tc.endOfDay); got != tc.want {
+			t.Errorf("auditDateToRFC3339(%q, %v) = %q, want %q", tc.in, tc.endOfDay, got, tc.want)
+		}
+	}
+}
+
+func TestAuditPageConvertsDatePickerValues(t *testing.T) {
+	// The form submits plain dates; the API call must carry the RFC3339
+	// day boundaries (until = next midnight, inclusive of the day's tail).
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("since") != "2026-07-06T00:00:00Z" || q.Get("until") != "2026-07-08T00:00:00Z" {
+			t.Errorf("since/until not converted: %q", r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[],"limit":50}`))
+	}))
+	defer target.Close()
+
+	cfg := testConfig(t, target.URL)
+	handler, err := NewServer(cfg, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	cookies := loginSession(t, handler, cfg)
+
+	req := httptest.NewRequest(http.MethodGet, "/audit?since=2026-07-06&until=2026-07-07", nil)
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	// The date-picker inputs echo the plain dates back, not the converted
+	// instants.
+	body := rec.Body.String()
+	if !strings.Contains(body, `value="2026-07-06"`) || !strings.Contains(body, `value="2026-07-07"`) {
+		t.Error("date-picker values not echoed back as plain dates")
+	}
+}
+
+func TestAuditPageDropdowns(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[],"limit":50}`))
+	}))
+	defer target.Close()
+
+	cfg := testConfig(t, target.URL)
+	// With a store, app_id becomes a dropdown fed by ListApps.
+	store := &fakeStore{apps: map[string]App{"ci-notifier": {ID: "ci-notifier"}}}
+	handler, err := NewServer(cfg, store, nil, nil)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	cookies := loginSession(t, handler, cfg)
+
+	req := httptest.NewRequest(http.MethodGet, "/audit?app_id=ci-notifier&limit=100", nil)
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	if !strings.Contains(body, `<option value="ci-notifier" selected>`) {
+		t.Error("expected the app_id dropdown with the filter selected")
+	}
+	if !strings.Contains(body, `<option value="100" selected>`) {
+		t.Error("expected the limit dropdown with 100 selected")
+	}
+	// An off-list limit from an old URL stays selectable rather than being
+	// silently rewritten.
+	req2 := httptest.NewRequest(http.MethodGet, "/audit?limit=37", nil)
+	for _, c := range cookies {
+		req2.AddCookie(c)
+	}
+	rec2 := httptest.NewRecorder()
+	handler.ServeHTTP(rec2, req2)
+	if !strings.Contains(rec2.Body.String(), `<option value="37" selected>`) {
+		t.Error("expected the off-list limit to stay selectable")
+	}
+}
+
 func TestAuditPageMapsServerErrorToKoreanBanner(t *testing.T) {
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)

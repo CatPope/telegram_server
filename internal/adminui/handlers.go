@@ -39,8 +39,12 @@ type pageData struct {
 
 	// Dashboard (UXUI redesign → 운영 재구성). Dash carries the 24h flow
 	// sections; the health strip fields survive even with a nil store.
+	// ChartRanges/ChartTitle drive the requests chart's 일/주/월/연 toggle.
 	Stats        *DashboardStats
 	LineChart    *LineChart
+	ChartErr     bool
+	ChartRanges  []ChartRangeLink
+	ChartTitle   string
 	Dash         *DashboardView
 	HealthOK     bool
 	HealthDB     string
@@ -66,10 +70,14 @@ type pageData struct {
 	TestSend *TestSendView
 
 	// Audit page (Phase A4). AuditVerify is set only by POST /audit/verify.
-	AuditFilters AuditFilters
-	AuditStages  []string
-	AuditRows    []AuditDisplayRow
-	AuditVerify  *AuditVerifyView
+	// AuditAppOptions empty → the template falls back to a free-text app_id
+	// input (nil store or failed lookup).
+	AuditFilters    AuditFilters
+	AuditStages     []string
+	AuditLimits     []string
+	AuditAppOptions []string
+	AuditRows       []AuditDisplayRow
+	AuditVerify     *AuditVerifyView
 }
 
 // KeyGroup is the group-by-app view of the global keys table.

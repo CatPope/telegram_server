@@ -8,3 +8,4 @@
 | 2026-07-10 | [line-chart-topn](2026-07-10-line-chart-topn.md) | 라인차트 상위 N + 기타 개선 (③) | ✅ green |
 | 2026-07-10 | [delivery-latency](2026-07-10-delivery-latency.md) | 전달 지연 p50/p95 카드 (④) | ✅ green |
 | 2026-07-10 | [full-width-layout](2026-07-10-full-width-layout.md) | 전 페이지 full-width 전환(폼 제외) | ✅ green |
+| 2026-07-13 | [adminui-request-batch](2026-07-13-adminui-request-batch.md) | 요청사항 일괄: 대시보드 재구성·전달현황 필터·앱 삭제·로그 필터 UI·purge API | ✅ green |

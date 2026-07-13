@@ -64,6 +64,7 @@ func NewServer(cfg Config, store Store, keys KeyStore, auditW audit.Writer) (htt
 		r.Get("/apps/{id}", s.handleAppDetail)
 		r.With(RequireCSRF(sm)).Post("/apps/{id}/patch", s.handleAppPatch)
 		r.With(RequireCSRF(sm)).Post("/apps/{id}/deactivate", s.handleAppDeactivate)
+		r.With(RequireCSRF(sm)).Post("/apps/{id}/delete", s.handleAppDelete)
 
 		r.Get("/keys", s.handleKeysPage)
 		r.With(RequireCSRF(sm)).Post("/keys", s.handleKeyIssue)

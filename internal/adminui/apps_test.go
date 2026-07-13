@@ -15,22 +15,35 @@ import (
 // a real database — Phase A2's plan explicitly abstracts Store behind an
 // interface for this reason.
 type fakeStore struct {
-	apps         map[string]App
-	users        []UserRow
-	stageCounts  []AppStageCount
-	kpi          KPICounts
-	kpiErr       error
-	pipeline     []StageCount
-	pipelineErr  error
-	causes       []ErrorCodeCount
-	causesErr    error
-	latency      LatencyStats
-	latencyErr   error
-	failures     []FailureRow
-	failuresErr  error
-	verifyResult audit.VerifyResult
-	verifyErr    error
-	err          error
+	apps           map[string]App
+	users          []UserRow
+	stageCounts    []AppStageCount
+	kpi            KPICounts
+	kpiErr         error
+	pipeline       []StageCount
+	pipelineErr    error
+	causes         []ErrorCodeCount
+	causesErr      error
+	latency        LatencyStats
+	latencyErr     error
+	latencySamples []float64
+	samplesErr     error
+	bucketsErr     error
+	daily          []StageDayCount
+	dailyErr       error
+	errorCodes     []string
+	errorCodesErr  error
+	failures       []FailureRow
+	failuresErr    error
+	verifyResult   audit.VerifyResult
+	verifyErr      error
+	err            error
+
+	// last* record the filters handlers passed in, so tests can assert
+	// the page's query params reach the store.
+	lastStageApp      string
+	lastTrendFilter   TrendFilter
+	lastFailureFilter FailureFilter
 }
 
 func (f *fakeStore) ListApps(context.Context) ([]App, error) {
@@ -69,7 +82,10 @@ func (f *fakeStore) DashboardStats(context.Context) (DashboardStats, error) {
 	return DashboardStats{TotalApps: len(f.apps), Users: len(f.users)}, nil
 }
 
-func (f *fakeStore) RequestSeries(context.Context, int) ([]AppDayCount, error) {
+func (f *fakeStore) RequestBuckets(context.Context, SeriesSpec) ([]AppDayCount, error) {
+	if f.bucketsErr != nil {
+		return nil, f.bucketsErr
+	}
 	return nil, f.err
 }
 
@@ -80,7 +96,8 @@ func (f *fakeStore) DeliveryKPICounts(context.Context) (KPICounts, error) {
 	return f.kpi, nil
 }
 
-func (f *fakeStore) StageCounts(context.Context, int) ([]AppStageCount, error) {
+func (f *fakeStore) StageCounts(_ context.Context, _ int, appID string) ([]AppStageCount, error) {
+	f.lastStageApp = appID
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -108,7 +125,30 @@ func (f *fakeStore) DeliveryLatency(context.Context) (LatencyStats, error) {
 	return f.latency, nil
 }
 
-func (f *fakeStore) RecentFailures(context.Context, int, int) ([]FailureRow, error) {
+func (f *fakeStore) LatencySamples(context.Context, int) ([]float64, error) {
+	if f.samplesErr != nil {
+		return nil, f.samplesErr
+	}
+	return f.latencySamples, nil
+}
+
+func (f *fakeStore) DeliveryDailyCounts(_ context.Context, filter TrendFilter) ([]StageDayCount, error) {
+	f.lastTrendFilter = filter
+	if f.dailyErr != nil {
+		return nil, f.dailyErr
+	}
+	return f.daily, nil
+}
+
+func (f *fakeStore) FailureErrorCodes(context.Context, int) ([]string, error) {
+	if f.errorCodesErr != nil {
+		return nil, f.errorCodesErr
+	}
+	return f.errorCodes, nil
+}
+
+func (f *fakeStore) RecentFailures(_ context.Context, filter FailureFilter) ([]FailureRow, error) {
+	f.lastFailureFilter = filter
 	if f.failuresErr != nil {
 		return nil, f.failuresErr
 	}

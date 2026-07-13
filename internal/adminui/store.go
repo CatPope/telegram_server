@@ -61,7 +61,10 @@ type Store interface {
 	// DeliveryKPICounts is the dashboard's headline row: message flow over
 	// the last 24 hours (rolling window, like StageCounts).
 	DashboardStats(ctx context.Context) (DashboardStats, error)
-	RequestSeries(ctx context.Context, days int) ([]AppDayCount, error)
+	// RequestBuckets is the requests chart series: 'received' counts per
+	// (app, bucket) over the spec's window. The bucket unit varies with the
+	// dashboard's 일/주/월/연 toggle (hourly / daily / monthly).
+	RequestBuckets(ctx context.Context, spec SeriesSpec) ([]AppDayCount, error)
 	DeliveryKPICounts(ctx context.Context) (KPICounts, error)
 
 	// Dashboard diagnostics (운영 재구성 v2). Both roll over the same 24h
@@ -79,11 +82,20 @@ type Store interface {
 	// retry, and population semantics.
 	DeliveryLatency(ctx context.Context) (LatencyStats, error)
 
+	// LatencySamples returns the individual received→delivered latencies
+	// (seconds) behind DeliveryLatency, newest delivery first, capped at
+	// limit — the dashboard's strip plot draws each completed trace as a dot.
+	LatencySamples(ctx context.Context, limit int) ([]float64, error)
+
 	// Delivery status page aggregates. StageCounts feeds the per-app
-	// funnel; RecentFailures lists the newest failure-stage rows within
-	// the same window so the 7d/24h toggle applies to both cards.
-	StageCounts(ctx context.Context, days int) ([]AppStageCount, error)
-	RecentFailures(ctx context.Context, days, limit int) ([]FailureRow, error)
+	// funnel (appID "" = all apps); RecentFailures lists the newest
+	// failure-stage rows matching the page filters; DeliveryDailyCounts
+	// feeds the filtered per-day trend chart; FailureErrorCodes fills the
+	// error-code filter dropdown from what actually occurred in the window.
+	StageCounts(ctx context.Context, days int, appID string) ([]AppStageCount, error)
+	RecentFailures(ctx context.Context, f FailureFilter) ([]FailureRow, error)
+	DeliveryDailyCounts(ctx context.Context, f TrendFilter) ([]StageDayCount, error)
+	FailureErrorCodes(ctx context.Context, days int) ([]string, error)
 
 	// VerifyAuditChain walks the audit_log hash chain in id order
 	// (read-only). Unlike the other methods it does NOT apply
@@ -109,11 +121,47 @@ type DashboardStats struct {
 	Users      int
 }
 
-// AppDayCount is one point of the requests-per-day series: how many
-// audit_log 'received' events an app produced on a given day.
+// AppDayCount is one point of the requests series: how many audit_log
+// 'received' events an app produced in a bucket (hour, day, or month,
+// depending on the SeriesSpec).
 type AppDayCount struct {
 	AppID string
 	Day   time.Time
+	Count int
+}
+
+// SeriesSpec describes the requests-chart window: Unit is the bucket size
+// ("hour", "day", or "month" — anything else is rejected) and Buckets is
+// how many consecutive buckets ending now the query covers.
+type SeriesSpec struct {
+	Unit    string
+	Buckets int
+}
+
+// FailureFilter scopes RecentFailures. Zero-value strings mean "no filter";
+// Days and Limit are always applied.
+type FailureFilter struct {
+	Days      int
+	Limit     int
+	AppID     string
+	Stage     string
+	ErrorCode string
+}
+
+// TrendFilter scopes DeliveryDailyCounts: the day window plus the delivery
+// page's optional app/stage/error-code filters ("" = all).
+type TrendFilter struct {
+	Days      int
+	AppID     string
+	Stage     string
+	ErrorCode string
+}
+
+// StageDayCount is one point of the delivery page's trend chart: how many
+// audit_log events landed in a stage on a given (UTC) day.
+type StageDayCount struct {
+	Day   time.Time
+	Stage string
 	Count int
 }
 
@@ -294,23 +342,39 @@ func (s *pgStore) DashboardStats(ctx context.Context) (DashboardStats, error) {
 	return st, nil
 }
 
-func (s *pgStore) RequestSeries(ctx context.Context, days int) ([]AppDayCount, error) {
-	// Buckets are UTC days end to end: the chart axis in dashboard.go is
-	// built from time.Now().UTC(), so bucketing here must not depend on
-	// the DB session timezone or edge-of-window days would misalign.
-	const q = `
-		SELECT app_id, (at AT TIME ZONE 'UTC')::date AS day, count(*)
+// seriesUnitSQL whitelists SeriesSpec.Unit → the SQL fragments interpolated
+// into the RequestBuckets query. The map is the only source of those
+// fragments, so no user input ever reaches the SQL text.
+var seriesUnitSQL = map[string]struct {
+	trunc    string // date_trunc unit
+	interval string // bucket-stepping interval
+}{
+	"hour":  {"hour", "interval '1 hour'"},
+	"day":   {"day", "interval '1 day'"},
+	"month": {"month", "interval '1 month'"},
+}
+
+func (s *pgStore) RequestBuckets(ctx context.Context, spec SeriesSpec) ([]AppDayCount, error) {
+	// Buckets are UTC end to end: the chart axis in dashboard.go is built
+	// from time.Now().UTC(), so bucketing here must not depend on the DB
+	// session timezone or edge-of-window buckets would misalign.
+	unit, ok := seriesUnitSQL[spec.Unit]
+	if !ok {
+		return nil, fmt.Errorf("adminui: request buckets: unknown unit %q", spec.Unit)
+	}
+	q := fmt.Sprintf(`
+		SELECT app_id, date_trunc('%s', at AT TIME ZONE 'UTC') AS bucket, count(*)
 		FROM audit_log
 		WHERE stage = 'received' AND app_id IS NOT NULL
-		  AND at >= (date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC') - ($1 - 1) * interval '1 day'
-		GROUP BY app_id, day
-		ORDER BY app_id, day`
+		  AND at >= (date_trunc('%s', now() AT TIME ZONE 'UTC') - ($1 - 1) * %s) AT TIME ZONE 'UTC'
+		GROUP BY app_id, bucket
+		ORDER BY app_id, bucket`, unit.trunc, unit.trunc, unit.interval)
 
 	ctx, cancel := context.WithTimeout(ctx, storeQueryTimeout)
 	defer cancel()
-	rows, err := s.pool.Query(ctx, q, days)
+	rows, err := s.pool.Query(ctx, q, spec.Buckets)
 	if err != nil {
-		return nil, fmt.Errorf("adminui: request series: %w", err)
+		return nil, fmt.Errorf("adminui: request buckets: %w", err)
 	}
 	defer rows.Close()
 
@@ -343,22 +407,24 @@ var deliveryFailureStages = []string{
 	"intrusion_kick", "intrusion_unmitigated",
 }
 
-func (s *pgStore) StageCounts(ctx context.Context, days int) ([]AppStageCount, error) {
+func (s *pgStore) StageCounts(ctx context.Context, days int, appID string) ([]AppStageCount, error) {
 	// A rolling window (now() - N days) rather than day bucketing, so no
-	// timezone alignment is needed — unlike RequestSeries there is no
-	// day axis to match on the Go side.
+	// timezone alignment is needed — unlike RequestBuckets there is no
+	// bucket axis to match on the Go side. appID '' disables the app
+	// filter ($3 short-circuit) — one prepared shape for both cases.
 	const q = `
 		SELECT app_id, stage, count(*)
 		FROM audit_log
 		WHERE app_id IS NOT NULL
 		  AND stage = ANY($1)
 		  AND at >= now() - $2 * interval '1 day'
+		  AND ($3 = '' OR app_id = $3)
 		GROUP BY app_id, stage
 		ORDER BY app_id, stage`
 
 	ctx, cancel := context.WithTimeout(ctx, storeQueryTimeout)
 	defer cancel()
-	rows, err := s.pool.Query(ctx, q, deliveryFunnelStages, days)
+	rows, err := s.pool.Query(ctx, q, deliveryFunnelStages, days, appID)
 	if err != nil {
 		return nil, fmt.Errorf("adminui: stage counts: %w", err)
 	}
@@ -378,20 +444,26 @@ func (s *pgStore) StageCounts(ctx context.Context, days int) ([]AppStageCount, e
 	return counts, nil
 }
 
-func (s *pgStore) RecentFailures(ctx context.Context, days, limit int) ([]FailureRow, error) {
+func (s *pgStore) RecentFailures(ctx context.Context, f FailureFilter) ([]FailureRow, error) {
 	// ORDER BY id alone: BIGSERIAL is insertion order, so the PK index
-	// satisfies the sort without materializing every failure row.
+	// satisfies the sort without materializing every failure row. The
+	// optional filters use the same ''-short-circuit shape as StageCounts.
+	// f.Stage narrows within the failure-stage set — a non-failure stage
+	// simply matches nothing.
 	const q = `
 		SELECT at, stage, COALESCE(app_id, ''), recipient_user_id,
 		       recipient_chat_id, COALESCE(error_code, ''), COALESCE(trace_id, '')
 		FROM audit_log
 		WHERE stage = ANY($1) AND at >= now() - $2 * interval '1 day'
+		  AND ($4 = '' OR app_id = $4)
+		  AND ($5 = '' OR stage = $5)
+		  AND ($6 = '' OR COALESCE(NULLIF(error_code, ''), 'unknown') = $6)
 		ORDER BY id DESC
 		LIMIT $3`
 
 	ctx, cancel := context.WithTimeout(ctx, storeQueryTimeout)
 	defer cancel()
-	rows, err := s.pool.Query(ctx, q, deliveryFailureStages, days, limit)
+	rows, err := s.pool.Query(ctx, q, deliveryFailureStages, f.Days, f.Limit, f.AppID, f.Stage, f.ErrorCode)
 	if err != nil {
 		return nil, fmt.Errorf("adminui: recent failures: %w", err)
 	}
@@ -582,4 +654,121 @@ func (s *pgStore) DeliveryLatency(ctx context.Context) (LatencyStats, error) {
 		return LatencyStats{}, fmt.Errorf("adminui: delivery latency: %w", err)
 	}
 	return st, nil
+}
+
+func (s *pgStore) LatencySamples(ctx context.Context, limit int) ([]float64, error) {
+	// Same pairing semantics as DeliveryLatency (see the rationale there);
+	// this returns the individual per-trace values instead of percentiles,
+	// newest delivery first so the cap keeps the most recent traces.
+	const q = `
+		WITH deliv AS (
+			SELECT trace_id, max(at) AS delivered_at
+			FROM audit_log
+			WHERE stage = 'delivered' AND trace_id IS NOT NULL
+			  AND at >= now() - interval '24 hours'
+			GROUP BY trace_id
+		),
+		recv AS (
+			SELECT trace_id, min(at) AS received_at
+			FROM audit_log
+			WHERE stage = 'received' AND trace_id IS NOT NULL
+			  AND at >= now() - interval '25 hours'
+			GROUP BY trace_id
+		)
+		SELECT EXTRACT(EPOCH FROM (d.delivered_at - r.received_at)) AS secs
+		FROM deliv d JOIN recv r USING (trace_id)
+		WHERE d.delivered_at >= r.received_at
+		ORDER BY d.delivered_at DESC
+		LIMIT $1`
+
+	ctx, cancel := context.WithTimeout(ctx, storeQueryTimeout)
+	defer cancel()
+	rows, err := s.pool.Query(ctx, q, limit)
+	if err != nil {
+		return nil, fmt.Errorf("adminui: latency samples: %w", err)
+	}
+	defer rows.Close()
+
+	var samples []float64
+	for rows.Next() {
+		var secs float64
+		if scanErr := rows.Scan(&secs); scanErr != nil {
+			return nil, fmt.Errorf("adminui: scan latency sample: %w", scanErr)
+		}
+		samples = append(samples, secs)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("adminui: rows: %w", err)
+	}
+	return samples, nil
+}
+
+func (s *pgStore) DeliveryDailyCounts(ctx context.Context, f TrendFilter) ([]StageDayCount, error) {
+	// UTC day buckets (like RequestBuckets) so the Go-side axis built from
+	// time.Now().UTC() lines up. Counts both pipeline and failure stages so
+	// the trend chart can show flow and failures on one axis; the optional
+	// filters use the same ''-short-circuit shape as StageCounts.
+	const q = `
+		SELECT date_trunc('day', at AT TIME ZONE 'UTC') AS day, stage, count(*)
+		FROM audit_log
+		WHERE (stage = ANY($1) OR stage = ANY($2))
+		  AND at >= (date_trunc('day', now() AT TIME ZONE 'UTC') - ($3 - 1) * interval '1 day') AT TIME ZONE 'UTC'
+		  AND ($4 = '' OR app_id = $4)
+		  AND ($5 = '' OR stage = $5)
+		  AND ($6 = '' OR COALESCE(NULLIF(error_code, ''), 'unknown') = $6)
+		GROUP BY day, stage
+		ORDER BY day, stage`
+
+	ctx, cancel := context.WithTimeout(ctx, storeQueryTimeout)
+	defer cancel()
+	rows, err := s.pool.Query(ctx, q, deliveryFunnelStages, deliveryFailureStages, f.Days, f.AppID, f.Stage, f.ErrorCode)
+	if err != nil {
+		return nil, fmt.Errorf("adminui: delivery daily counts: %w", err)
+	}
+	defer rows.Close()
+
+	var counts []StageDayCount
+	for rows.Next() {
+		var c StageDayCount
+		if scanErr := rows.Scan(&c.Day, &c.Stage, &c.Count); scanErr != nil {
+			return nil, fmt.Errorf("adminui: scan daily count: %w", scanErr)
+		}
+		counts = append(counts, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("adminui: rows: %w", err)
+	}
+	return counts, nil
+}
+
+func (s *pgStore) FailureErrorCodes(ctx context.Context, days int) ([]string, error) {
+	// Distinct error codes seen on failure stages in the window, for the
+	// filter dropdown — same 'unknown' collapse as FailureCauseCounts so
+	// the dropdown values match what the page displays.
+	const q = `
+		SELECT DISTINCT COALESCE(NULLIF(error_code, ''), 'unknown') AS code
+		FROM audit_log
+		WHERE stage = ANY($1) AND at >= now() - $2 * interval '1 day'
+		ORDER BY code`
+
+	ctx, cancel := context.WithTimeout(ctx, storeQueryTimeout)
+	defer cancel()
+	rows, err := s.pool.Query(ctx, q, deliveryFailureStages, days)
+	if err != nil {
+		return nil, fmt.Errorf("adminui: failure error codes: %w", err)
+	}
+	defer rows.Close()
+
+	var codes []string
+	for rows.Next() {
+		var code string
+		if scanErr := rows.Scan(&code); scanErr != nil {
+			return nil, fmt.Errorf("adminui: scan error code: %w", scanErr)
+		}
+		codes = append(codes, code)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("adminui: rows: %w", err)
+	}
+	return codes, nil
 }
