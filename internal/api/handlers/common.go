@@ -14,6 +14,98 @@ import (
 	"github.com/CatPope/telegram_server/internal/dispatch/strategy"
 )
 
+// --- shared HTTP helpers ---
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func writeError(w http.ResponseWriter, status int, code string) {
+	writeJSON(w, status, map[string]any{"error": code})
+}
+
+// decodeStrict decodes the request body into v, rejecting unknown fields.
+func decodeStrict(r *http.Request, v any) error {
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	return dec.Decode(v)
+}
+
+func writeAuditSafe(r *http.Request, w audit.Writer, e audit.Event) error {
+	if w == nil {
+		return nil
+	}
+	err := w.Write(r.Context(), e)
+	if err != nil {
+		middleware.Log("error", "audit_write_failed", map[string]any{
+			"trace_id": middleware.TraceID(r.Context()),
+			"stage":    string(e.Stage),
+			"error":    err.Error(),
+		})
+	}
+	return err
+}
+
+// --- auditFlow ---
+
+// auditFlow bundles the per-request fields every audit event of a handler
+// shares (trace, message id, endpoint, requester identity, capability) so
+// each stage write is a one-liner instead of a repeated struct literal.
+type auditFlow struct {
+	w     http.ResponseWriter
+	r     *http.Request
+	audit audit.Writer
+	base  audit.Event
+}
+
+func newAuditFlow(w http.ResponseWriter, r *http.Request, auditW audit.Writer, cap auth.Capability) *auditFlow {
+	id, _ := auth.RequesterFrom(r.Context())
+	return &auditFlow{
+		w:     w,
+		r:     r,
+		audit: auditW,
+		base: audit.Event{
+			TraceID:          middleware.TraceID(r.Context()),
+			MessageID:        uuid.NewString(),
+			Endpoint:         r.URL.Path,
+			AppID:            id.AppID,
+			Capability:       string(cap),
+			CapabilitySetVer: id.CapabilitySetVer,
+		},
+	}
+}
+
+// event returns a copy of the base event stamped with the given stage.
+func (f *auditFlow) event(stage audit.Stage) audit.Event {
+	e := f.base
+	e.Stage = stage
+	return e
+}
+
+func (f *auditFlow) received() {
+	_ = writeAuditSafe(f.r, f.audit, f.event(audit.StageReceived))
+}
+
+// deny writes a denied audit event and the matching JSON error response.
+func (f *auditFlow) deny(code string, status int) {
+	e := f.event(audit.StageDenied)
+	e.ErrorCode = code
+	_ = writeAuditSafe(f.r, f.audit, e)
+	writeError(f.w, status, code)
+}
+
+// succeed writes the validated (with details) and delivered stages.
+func (f *auditFlow) succeed(details map[string]any) {
+	e := f.event(audit.StageValidated)
+	e.Details = details
+	_ = writeAuditSafe(f.r, f.audit, e)
+	_ = writeAuditSafe(f.r, f.audit, f.event(audit.StageDelivered))
+}
+
+// --- strategy dispatch pipeline ---
+
 type dispatchOpts struct {
 	RequireAppID      bool
 	RequireRecipients bool
@@ -57,67 +149,38 @@ func runStrategyDispatch(
 	cap auth.Capability,
 	opts dispatchOpts,
 ) {
-	id, _ := auth.RequesterFrom(r.Context())
-	trace := middleware.TraceID(r.Context())
-	messageID := uuid.NewString()
-	stratName := strat.Name()
-	endpoint := r.URL.Path
+	flow := newAuditFlow(w, r, auditW, cap)
+	flow.base.RouteStrategy = strat.Name()
 
-	denyAndWriteAudit := func(code string, status int) {
-		_ = writeAuditSafe(r, auditW, audit.Event{
-			TraceID:          trace,
-			MessageID:        messageID,
-			Stage:            audit.StageDenied,
-			Endpoint:         endpoint,
-			AppID:            id.AppID,
-			Capability:       string(cap),
-			CapabilitySetVer: id.CapabilitySetVer,
-			RouteStrategy:    stratName,
-			ErrorCode:        code,
-		})
-		writeError(w, status, code)
-	}
-
-	if err := writeAuditSafe(r, auditW, audit.Event{
-		TraceID:          trace,
-		MessageID:        messageID,
-		Stage:            audit.StageReceived,
-		Endpoint:         endpoint,
-		AppID:            id.AppID,
-		Capability:       string(cap),
-		CapabilitySetVer: id.CapabilitySetVer,
-		RouteStrategy:    stratName,
-	}); err != nil {
+	if err := writeAuditSafe(r, auditW, flow.event(audit.StageReceived)); err != nil {
 		writeError(w, http.StatusInternalServerError, "audit_unavailable")
 		return
 	}
 
 	var req dispatchRequest
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil {
-		denyAndWriteAudit("malformed_json", http.StatusBadRequest)
+	if err := decodeStrict(r, &req); err != nil {
+		flow.deny("malformed_json", http.StatusBadRequest)
 		return
 	}
 
 	if req.Envelope.SchemaVersion == 0 {
-		denyAndWriteAudit("missing_envelope_version", http.StatusBadRequest)
+		flow.deny("missing_envelope_version", http.StatusBadRequest)
 		return
 	}
 	if req.Envelope.SchemaVersion != 1 {
-		denyAndWriteAudit("unsupported_envelope_version", http.StatusBadRequest)
+		flow.deny("unsupported_envelope_version", http.StatusBadRequest)
 		return
 	}
 	if req.Envelope.Text == "" {
-		denyAndWriteAudit("empty_envelope_text", http.StatusBadRequest)
+		flow.deny("empty_envelope_text", http.StatusBadRequest)
 		return
 	}
 	if opts.RequireAppID && req.AppID == "" {
-		denyAndWriteAudit("missing_app_id", http.StatusBadRequest)
+		flow.deny("missing_app_id", http.StatusBadRequest)
 		return
 	}
 	if opts.RequireRecipients && len(req.Recipients) == 0 {
-		denyAndWriteAudit("empty_recipients", http.StatusBadRequest)
+		flow.deny("empty_recipients", http.StatusBadRequest)
 		return
 	}
 	if !opts.AllowMinGrade {
@@ -141,122 +204,72 @@ func runStrategyDispatch(
 			code = "empty_recipients"
 			status = http.StatusBadRequest
 		}
-		denyAndWriteAudit(code, status)
+		flow.deny(code, status)
 		return
 	}
 
-	if err := writeAuditSafe(r, auditW, audit.Event{
-		TraceID:          trace,
-		MessageID:        messageID,
-		Stage:            audit.StageValidated,
-		Endpoint:         endpoint,
-		AppID:            id.AppID,
-		Capability:       string(cap),
-		CapabilitySetVer: id.CapabilitySetVer,
-		RouteStrategy:    stratName,
-		Details: map[string]any{
-			"recipients_requested": len(req.Recipients),
-			"recipients_resolved":  len(resolved.Recipients),
-			"recipients_skipped":   len(resolved.Skipped),
-		},
-	}); err != nil {
+	validated := flow.event(audit.StageValidated)
+	validated.Details = map[string]any{
+		"recipients_requested": len(req.Recipients),
+		"recipients_resolved":  len(resolved.Recipients),
+		"recipients_skipped":   len(resolved.Skipped),
+	}
+	if err := writeAuditSafe(r, auditW, validated); err != nil {
 		writeError(w, http.StatusInternalServerError, "audit_unavailable")
 		return
 	}
 
-	resp := dispatchResponse{MessageID: messageID}
+	recipientEvent := func(stage audit.Stage, channel audit.DeliveryChannel, userID, chatID int64, code string) audit.Event {
+		e := flow.event(stage)
+		e.DeliveryChannel = channel
+		e.RecipientUserID = userID
+		e.RecipientChatID = chatID
+		e.ErrorCode = code
+		return e
+	}
+
+	resp := dispatchResponse{MessageID: flow.base.MessageID}
 	for _, rh := range resolved.Recipients {
 		channel := audit.DeliveryChannel(rh.Channel)
-		_ = writeAuditSafe(r, auditW, audit.Event{
-			TraceID:          trace,
-			MessageID:        messageID,
-			Stage:            audit.StageDispatched,
-			Endpoint:         endpoint,
-			AppID:            id.AppID,
-			Capability:       string(cap),
-			CapabilitySetVer: id.CapabilitySetVer,
-			RouteStrategy:    stratName,
-			DeliveryChannel:  channel,
-			RecipientUserID:  rh.UserID,
-			RecipientChatID:  rh.ChatID,
-		})
+		_ = writeAuditSafe(r, auditW, recipientEvent(audit.StageDispatched, channel, rh.UserID, rh.ChatID, ""))
 		result, sendErr := disp.Send(r.Context(), rh, req.Envelope)
 		if sendErr != nil {
 			code := classifyDispatchErr(sendErr)
-			_ = writeAuditSafe(r, auditW, audit.Event{
-				TraceID:          trace,
-				MessageID:        messageID,
-				Stage:            audit.StageDeferred,
-				Endpoint:         endpoint,
-				AppID:            id.AppID,
-				Capability:       string(cap),
-				CapabilitySetVer: id.CapabilitySetVer,
-				RouteStrategy:    stratName,
-				DeliveryChannel:  channel,
-				RecipientUserID:  rh.UserID,
-				RecipientChatID:  rh.ChatID,
-				ErrorCode:        code,
-			})
+			_ = writeAuditSafe(r, auditW, recipientEvent(audit.StageDeferred, channel, rh.UserID, rh.ChatID, code))
 			resp.Failed++
 			resp.Recipients = append(resp.Recipients, dispatchReport{
 				UserID: rh.UserID, Status: "failed", Reason: code,
 			})
 			continue
 		}
-		_ = writeAuditSafe(r, auditW, audit.Event{
-			TraceID:          trace,
-			MessageID:        messageID,
-			Stage:            audit.StageDelivered,
-			Endpoint:         endpoint,
-			AppID:            id.AppID,
-			Capability:       string(cap),
-			CapabilitySetVer: id.CapabilitySetVer,
-			RouteStrategy:    stratName,
-			DeliveryChannel:  channel,
-			RecipientUserID:  rh.UserID,
-			RecipientChatID:  rh.ChatID,
-		})
+		_ = writeAuditSafe(r, auditW, recipientEvent(audit.StageDelivered, channel, rh.UserID, rh.ChatID, ""))
 		resp.Delivered++
 		resp.Recipients = append(resp.Recipients, dispatchReport{
 			UserID: rh.UserID, Status: "delivered", MessageID: result.TelegramMessageID,
 		})
 	}
 	for _, sk := range resolved.Skipped {
-		_ = writeAuditSafe(r, auditW, audit.Event{
-			TraceID:          trace,
-			MessageID:        messageID,
-			Stage:            audit.StageDenied,
-			Endpoint:         endpoint,
-			AppID:            id.AppID,
-			Capability:       string(cap),
-			CapabilitySetVer: id.CapabilitySetVer,
-			RouteStrategy:    stratName,
-			DeliveryChannel:  opts.DefaultChannel,
-			RecipientUserID:  sk.UserID,
-			ErrorCode:        sk.Code,
-		})
+		_ = writeAuditSafe(r, auditW, recipientEvent(audit.StageDenied, opts.DefaultChannel, sk.UserID, 0, sk.Code))
 		resp.Skipped++
 		resp.Recipients = append(resp.Recipients, dispatchReport{
 			UserID: sk.UserID, Status: "skipped", Reason: sk.Code,
 		})
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(resp)
+	writeJSON(w, http.StatusOK, resp)
 }
 
-func writeAuditSafe(r *http.Request, w audit.Writer, e audit.Event) error {
-	if w == nil {
-		return nil
+func classifyDispatchErr(err error) string {
+	switch {
+	case errors.Is(err, dispatch.ErrChatNotFound):
+		return "chat_not_found"
+	case errors.Is(err, dispatch.ErrBotNotAdmin):
+		return "bot_not_admin"
+	case errors.Is(err, dispatch.ErrRateLimited):
+		return "telegram_rate_limited"
+	case errors.Is(err, dispatch.ErrTelegramAuth):
+		return "telegram_auth_failed"
+	default:
+		return "telegram_transient"
 	}
-	err := w.Write(r.Context(), e)
-	if err != nil {
-		middleware.Log("error", "audit_write_failed", map[string]any{
-			"trace_id": middleware.TraceID(r.Context()),
-			"stage":    string(e.Stage),
-			"error":    err.Error(),
-		})
-	}
-	return err
 }

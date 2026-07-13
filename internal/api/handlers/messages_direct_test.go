@@ -117,7 +117,7 @@ func TestDirectHandlerHappyPath(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status: %d body=%s", w.Code, w.Body.String())
 	}
-	var resp directResponse
+	var resp dispatchResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode: %v body=%s", err, w.Body.String())
 	}
@@ -216,7 +216,7 @@ func TestDirectHandlerSkipsUnsubscribedRecipient(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status: %d", w.Code)
 	}
-	var resp directResponse
+	var resp dispatchResponse
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 	if resp.Skipped != 1 || resp.Delivered != 0 || resp.Recipients[0].Reason != "recipient_not_subscribed" {
 		t.Fatalf("counters wrong: %+v", resp)
@@ -254,7 +254,7 @@ func TestDirectHandlerRecordsDispatchFailure(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status: %d", w.Code)
 	}
-	var resp directResponse
+	var resp dispatchResponse
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
 	if resp.Failed != 1 || resp.Delivered != 0 {
 		t.Fatalf("counters wrong: %+v", resp)

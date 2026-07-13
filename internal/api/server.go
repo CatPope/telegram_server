@@ -50,6 +50,8 @@ func NewRouter(d Deps) http.Handler {
 			Method(http.MethodPatch, "/apps/{id}", http.HandlerFunc((&handlers.AdminAppsHandler{Pool: d.Pool, Audit: d.Audit}).Patch))
 		r.With(middleware.RequireCapability(auth.CapAppsRegister, d.Audit)).
 			Method(http.MethodDelete, "/apps/{id}", http.HandlerFunc((&handlers.AdminAppsHandler{Pool: d.Pool, Audit: d.Audit}).Delete))
+		r.With(middleware.RequireCapability(auth.CapAppsRegister, d.Audit)).
+			Method(http.MethodDelete, "/apps/{id}/purge", http.HandlerFunc((&handlers.AdminAppsHandler{Pool: d.Pool, Audit: d.Audit}).Purge))
 
 		r.With(middleware.RequireCapability(auth.CapUsersPromote, d.Audit)).
 			Method(http.MethodPatch, "/users/{telegram_id}", http.HandlerFunc((&handlers.AdminUsersHandler{Pool: d.Pool, Audit: d.Audit}).Patch))

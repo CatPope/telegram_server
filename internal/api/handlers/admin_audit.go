@@ -6,10 +6,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/CatPope/telegram_server/internal/api/middleware"
 	"github.com/CatPope/telegram_server/internal/audit"
 	"github.com/CatPope/telegram_server/internal/auth"
 )
@@ -56,35 +54,8 @@ type auditRow struct {
 
 // Search handles GET /admin/audit/search
 func (h *AdminAuditHandler) Search(w http.ResponseWriter, r *http.Request) {
-	id, _ := auth.RequesterFrom(r.Context())
-	trace := middleware.TraceID(r.Context())
-	messageID := uuid.NewString()
-	endpoint := r.URL.Path
-	cap := string(auth.CapAuditSearch)
-
-	deny := func(code string, status int) {
-		_ = writeAuditSafe(r, h.Audit, audit.Event{
-			TraceID:          trace,
-			MessageID:        messageID,
-			Stage:            audit.StageDenied,
-			Endpoint:         endpoint,
-			AppID:            id.AppID,
-			Capability:       cap,
-			CapabilitySetVer: id.CapabilitySetVer,
-			ErrorCode:        code,
-		})
-		writeError(w, status, code)
-	}
-
-	_ = writeAuditSafe(r, h.Audit, audit.Event{
-		TraceID:          trace,
-		MessageID:        messageID,
-		Stage:            audit.StageReceived,
-		Endpoint:         endpoint,
-		AppID:            id.AppID,
-		Capability:       cap,
-		CapabilitySetVer: id.CapabilitySetVer,
-	})
+	flow := newAuditFlow(w, r, h.Audit, auth.CapAuditSearch)
+	flow.received()
 
 	q := r.URL.Query()
 
@@ -93,7 +64,7 @@ func (h *AdminAuditHandler) Search(w http.ResponseWriter, r *http.Request) {
 	if ls := q.Get("limit"); ls != "" {
 		v, err := strconv.Atoi(ls)
 		if err != nil || v <= 0 || v > 500 {
-			deny("invalid_limit", http.StatusBadRequest)
+			flow.deny("invalid_limit", http.StatusBadRequest)
 			return
 		}
 		limit = v
@@ -104,7 +75,7 @@ func (h *AdminAuditHandler) Search(w http.ResponseWriter, r *http.Request) {
 	if s := q.Get("since"); s != "" {
 		t, err := time.Parse(time.RFC3339, s)
 		if err != nil {
-			deny("invalid_since", http.StatusBadRequest)
+			flow.deny("invalid_since", http.StatusBadRequest)
 			return
 		}
 		since = &t
@@ -112,7 +83,7 @@ func (h *AdminAuditHandler) Search(w http.ResponseWriter, r *http.Request) {
 	if u := q.Get("until"); u != "" {
 		t, err := time.Parse(time.RFC3339, u)
 		if err != nil {
-			deny("invalid_until", http.StatusBadRequest)
+			flow.deny("invalid_until", http.StatusBadRequest)
 			return
 		}
 		until = &t
@@ -122,7 +93,7 @@ func (h *AdminAuditHandler) Search(w http.ResponseWriter, r *http.Request) {
 	filterAppID := q.Get("app_id")
 	stage := q.Get("stage")
 	if stage != "" && !validAuditStages[audit.Stage(stage)] {
-		deny("invalid_stage", http.StatusBadRequest)
+		flow.deny("invalid_stage", http.StatusBadRequest)
 		return
 	}
 
@@ -164,10 +135,9 @@ func (h *AdminAuditHandler) Search(w http.ResponseWriter, r *http.Request) {
 		recipient_user_id, recipient_chat_id, error_code, details_json
 	FROM audit_log ` + where + ` ORDER BY at DESC LIMIT $` + strconv.Itoa(len(args))
 
-	ctx := r.Context()
-	rows, err := h.Pool.Query(ctx, sqlQuery, args...)
+	rows, err := h.Pool.Query(r.Context(), sqlQuery, args...)
 	if err != nil {
-		deny("db_error", http.StatusInternalServerError)
+		flow.deny("db_error", http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
@@ -183,48 +153,28 @@ func (h *AdminAuditHandler) Search(w http.ResponseWriter, r *http.Request) {
 			&row.RecipientUserID, &row.RecipientChatID,
 			&row.ErrorCode, &row.DetailsJSON,
 		); scanErr != nil {
-			deny("db_error", http.StatusInternalServerError)
+			flow.deny("db_error", http.StatusInternalServerError)
 			return
 		}
 		row.At = at.UTC().Format(time.RFC3339)
 		results = append(results, row)
 	}
 	if err := rows.Err(); err != nil {
-		deny("db_error", http.StatusInternalServerError)
+		flow.deny("db_error", http.StatusInternalServerError)
 		return
 	}
 
-	_ = writeAuditSafe(r, h.Audit, audit.Event{
-		TraceID:          trace,
-		MessageID:        messageID,
-		Stage:            audit.StageValidated,
-		Endpoint:         endpoint,
-		AppID:            id.AppID,
-		Capability:       cap,
-		CapabilitySetVer: id.CapabilitySetVer,
-		Details: map[string]any{
-			"result_count":    len(results),
-			"requested_limit": limit,
-			"filter_trace_id": traceID != "",
-			"filter_app_id":   filterAppID,
-			"filter_stage":    stage,
-			"filter_since":    since != nil,
-			"filter_until":    until != nil,
-		},
-	})
-	_ = writeAuditSafe(r, h.Audit, audit.Event{
-		TraceID:          trace,
-		MessageID:        messageID,
-		Stage:            audit.StageDelivered,
-		Endpoint:         endpoint,
-		AppID:            id.AppID,
-		Capability:       cap,
-		CapabilitySetVer: id.CapabilitySetVer,
+	flow.succeed(map[string]any{
+		"result_count":    len(results),
+		"requested_limit": limit,
+		"filter_trace_id": traceID != "",
+		"filter_app_id":   filterAppID,
+		"filter_stage":    stage,
+		"filter_since":    since != nil,
+		"filter_until":    until != nil,
 	})
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	writeJSON(w, http.StatusOK, map[string]any{
 		"results": results,
 		"limit":   limit,
 	})

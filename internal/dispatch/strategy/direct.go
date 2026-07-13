@@ -2,10 +2,8 @@ package strategy
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -128,6 +126,3 @@ func (r *PgDirectResolver) ResolveDirect(ctx context.Context, userIDs []int64, a
 	}
 	return res, nil
 }
-
-var _ = errors.Is
-var _ = pgx.ErrNoRows

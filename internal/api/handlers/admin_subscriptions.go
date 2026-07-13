@@ -1,13 +1,11 @@
 package handlers
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -28,43 +26,16 @@ type AdminSubscriptionsHandler struct {
 
 // Subscribe handles POST /admin/users/{telegram_id}/subscriptions/{app_id}
 func (h *AdminSubscriptionsHandler) Subscribe(w http.ResponseWriter, r *http.Request) {
-	id, _ := auth.RequesterFrom(r.Context())
-	trace := middleware.TraceID(r.Context())
-	messageID := uuid.NewString()
-	endpoint := r.URL.Path
-	cap := string(auth.CapAppsRegister)
-	telegramIDStr := chi.URLParam(r, "telegram_id")
+	flow := newAuditFlow(w, r, h.Audit, auth.CapAppsRegister)
 	appID := chi.URLParam(r, "app_id")
 
-	deny := func(code string, status int) {
-		_ = writeAuditSafe(r, h.Audit, audit.Event{
-			TraceID:          trace,
-			MessageID:        messageID,
-			Stage:            audit.StageDenied,
-			Endpoint:         endpoint,
-			AppID:            id.AppID,
-			Capability:       cap,
-			CapabilitySetVer: id.CapabilitySetVer,
-			ErrorCode:        code,
-		})
-		writeError(w, status, code)
-	}
-
-	telegramID, err := strconv.ParseInt(telegramIDStr, 10, 64)
+	telegramID, err := strconv.ParseInt(chi.URLParam(r, "telegram_id"), 10, 64)
 	if err != nil {
-		deny("invalid_telegram_id", http.StatusBadRequest)
+		flow.deny("invalid_telegram_id", http.StatusBadRequest)
 		return
 	}
 
-	_ = writeAuditSafe(r, h.Audit, audit.Event{
-		TraceID:          trace,
-		MessageID:        messageID,
-		Stage:            audit.StageReceived,
-		Endpoint:         endpoint,
-		AppID:            id.AppID,
-		Capability:       cap,
-		CapabilitySetVer: id.CapabilitySetVer,
-	})
+	flow.received()
 
 	ctx := r.Context()
 
@@ -72,14 +43,14 @@ func (h *AdminSubscriptionsHandler) Subscribe(w http.ResponseWriter, r *http.Req
 	var appActive bool
 	if scanErr := h.Pool.QueryRow(ctx, `SELECT active FROM apps WHERE id=$1`, appID).Scan(&appActive); scanErr != nil {
 		if errors.Is(scanErr, pgx.ErrNoRows) {
-			deny("app_not_found", http.StatusNotFound)
+			flow.deny("app_not_found", http.StatusNotFound)
 			return
 		}
-		deny("db_error", http.StatusInternalServerError)
+		flow.deny("db_error", http.StatusInternalServerError)
 		return
 	}
 	if !appActive {
-		deny("app_inactive", http.StatusBadRequest)
+		flow.deny("app_inactive", http.StatusBadRequest)
 		return
 	}
 
@@ -88,7 +59,7 @@ func (h *AdminSubscriptionsHandler) Subscribe(w http.ResponseWriter, r *http.Req
 	if scanErr := h.Pool.QueryRow(ctx,
 		`SELECT id FROM users WHERE telegram_id=$1`, telegramID,
 	).Scan(&userID); scanErr != nil {
-		deny("user_not_found", http.StatusNotFound)
+		flow.deny("user_not_found", http.StatusNotFound)
 		return
 	}
 
@@ -97,7 +68,7 @@ func (h *AdminSubscriptionsHandler) Subscribe(w http.ResponseWriter, r *http.Req
 		userID, appID,
 	)
 	if err != nil {
-		deny("db_error", http.StatusInternalServerError)
+		flow.deny("db_error", http.StatusInternalServerError)
 		return
 	}
 
@@ -109,109 +80,38 @@ func (h *AdminSubscriptionsHandler) Subscribe(w http.ResponseWriter, r *http.Req
 		"note":        "topic not yet provisioned; user must run /apps",
 	})
 
-	_ = writeAuditSafe(r, h.Audit, audit.Event{
-		TraceID:          trace,
-		MessageID:        messageID,
-		Stage:            audit.StageValidated,
-		Endpoint:         endpoint,
-		AppID:            id.AppID,
-		Capability:       cap,
-		CapabilitySetVer: id.CapabilitySetVer,
-		Details:          map[string]any{"telegram_id": telegramID, "app_id": appID},
-	})
-	_ = writeAuditSafe(r, h.Audit, audit.Event{
-		TraceID:          trace,
-		MessageID:        messageID,
-		Stage:            audit.StageDelivered,
-		Endpoint:         endpoint,
-		AppID:            id.AppID,
-		Capability:       cap,
-		CapabilitySetVer: id.CapabilitySetVer,
-	})
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]any{"telegram_id": telegramID, "app_id": appID, "subscribed": true})
+	flow.succeed(map[string]any{"telegram_id": telegramID, "app_id": appID})
+	writeJSON(w, http.StatusOK, map[string]any{"telegram_id": telegramID, "app_id": appID, "subscribed": true})
 }
 
 // Unsubscribe handles DELETE /admin/users/{telegram_id}/subscriptions/{app_id}
 func (h *AdminSubscriptionsHandler) Unsubscribe(w http.ResponseWriter, r *http.Request) {
-	id, _ := auth.RequesterFrom(r.Context())
-	trace := middleware.TraceID(r.Context())
-	messageID := uuid.NewString()
-	endpoint := r.URL.Path
-	cap := string(auth.CapAppsRegister)
-	telegramIDStr := chi.URLParam(r, "telegram_id")
+	flow := newAuditFlow(w, r, h.Audit, auth.CapAppsRegister)
 	appID := chi.URLParam(r, "app_id")
 
-	deny := func(code string, status int) {
-		_ = writeAuditSafe(r, h.Audit, audit.Event{
-			TraceID:          trace,
-			MessageID:        messageID,
-			Stage:            audit.StageDenied,
-			Endpoint:         endpoint,
-			AppID:            id.AppID,
-			Capability:       cap,
-			CapabilitySetVer: id.CapabilitySetVer,
-			ErrorCode:        code,
-		})
-		writeError(w, status, code)
-	}
-
-	telegramID, err := strconv.ParseInt(telegramIDStr, 10, 64)
+	telegramID, err := strconv.ParseInt(chi.URLParam(r, "telegram_id"), 10, 64)
 	if err != nil {
-		deny("invalid_telegram_id", http.StatusBadRequest)
+		flow.deny("invalid_telegram_id", http.StatusBadRequest)
 		return
 	}
 
-	_ = writeAuditSafe(r, h.Audit, audit.Event{
-		TraceID:          trace,
-		MessageID:        messageID,
-		Stage:            audit.StageReceived,
-		Endpoint:         endpoint,
-		AppID:            id.AppID,
-		Capability:       cap,
-		CapabilitySetVer: id.CapabilitySetVer,
-	})
+	flow.received()
 
-	ctx := r.Context()
-
-	tag, err := h.Pool.Exec(ctx,
+	tag, err := h.Pool.Exec(r.Context(),
 		`DELETE FROM user_subscriptions
 		 WHERE user_id = (SELECT id FROM users WHERE telegram_id=$1)
 		   AND app_id = $2`,
 		telegramID, appID,
 	)
 	if err != nil {
-		deny("db_error", http.StatusInternalServerError)
+		flow.deny("db_error", http.StatusInternalServerError)
 		return
 	}
 	if tag.RowsAffected() == 0 {
-		deny("subscription_not_found", http.StatusNotFound)
+		flow.deny("subscription_not_found", http.StatusNotFound)
 		return
 	}
 
-	_ = writeAuditSafe(r, h.Audit, audit.Event{
-		TraceID:          trace,
-		MessageID:        messageID,
-		Stage:            audit.StageValidated,
-		Endpoint:         endpoint,
-		AppID:            id.AppID,
-		Capability:       cap,
-		CapabilitySetVer: id.CapabilitySetVer,
-		Details:          map[string]any{"telegram_id": telegramID, "app_id": appID},
-	})
-	_ = writeAuditSafe(r, h.Audit, audit.Event{
-		TraceID:          trace,
-		MessageID:        messageID,
-		Stage:            audit.StageDelivered,
-		Endpoint:         endpoint,
-		AppID:            id.AppID,
-		Capability:       cap,
-		CapabilitySetVer: id.CapabilitySetVer,
-	})
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]any{"telegram_id": telegramID, "app_id": appID, "subscribed": false})
+	flow.succeed(map[string]any{"telegram_id": telegramID, "app_id": appID})
+	writeJSON(w, http.StatusOK, map[string]any{"telegram_id": telegramID, "app_id": appID, "subscribed": false})
 }

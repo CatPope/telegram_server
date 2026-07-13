@@ -2,7 +2,6 @@ package telegram
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -81,5 +80,3 @@ func classify(err error) error {
 	}
 	return fmt.Errorf("%w: %v", dispatch.ErrTransient, err)
 }
-
-var _ = errors.Is
