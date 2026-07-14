@@ -77,9 +77,13 @@ func TestBuildLineChartSingleAppRendersPolylineAndLegend(t *testing.T) {
 	if len(chart.Legend) != 1 || chart.Legend[0].Label != "notify-service" {
 		t.Errorf("unexpected legend: %+v", chart.Legend)
 	}
-	// Hover points carry the per-bucket count in a native <title> tooltip.
-	if !strings.Contains(svg, "<circle") || !strings.Contains(svg, "notify-service · 5건</title>") {
-		t.Errorf("expected hover circles with count titles in SVG: %s", svg)
+	// Hover points carry the per-bucket count in an instant CSS tooltip
+	// (a .tip text node — the native <title> only shows after ~1s).
+	if !strings.Contains(svg, `class="pt"`) || !strings.Contains(svg, `class="tip"`) {
+		t.Errorf("expected instant-hover point groups in SVG: %s", svg)
+	}
+	if !strings.Contains(svg, "notify-service · 5건</text>") {
+		t.Errorf("expected count tooltip text in SVG: %s", svg)
 	}
 }
 
@@ -414,15 +418,15 @@ func TestBuildLatencyStrip(t *testing.T) {
 	if !strings.Contains(svg, "p50 7ms") {
 		t.Errorf("expected the p50 marker label: %s", svg)
 	}
-	// One hover dot per sample; the tooltip names the delivering app, and
-	// an app-less sample falls back to the bare value.
-	if got := strings.Count(svg, "<circle"); got != 3 {
-		t.Errorf("expected 3 dots, got %d: %s", got, svg)
+	// One hover group per sample; the instant tip names the delivering app,
+	// and an app-less sample falls back to the bare value.
+	if got := strings.Count(svg, `<g class="pt">`); got != 3 {
+		t.Errorf("expected 3 hover dot groups, got %d: %s", got, svg)
 	}
-	if !strings.Contains(svg, "<title>ci-notifier · 4ms</title>") {
+	if !strings.Contains(svg, ">ci-notifier · 4ms</text>") {
 		t.Errorf("expected app-qualified dot tooltips: %s", svg)
 	}
-	if !strings.Contains(svg, "<title>12ms</title>") {
+	if !strings.Contains(svg, ">12ms</text>") {
 		t.Errorf("expected bare value tooltip for an app-less sample: %s", svg)
 	}
 }

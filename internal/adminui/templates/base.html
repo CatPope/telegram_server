@@ -131,6 +131,20 @@
   .filter-form { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
   .trend-chart svg { display: block; width: 100%; height: auto; }
 
+  /* ── SVG 즉시 툴팁 ───────────────────────────────────── */
+  /* 네이티브 <title> 툴팁은 브라우저가 ~1초 지연 후에야 띄운다(제어 불가).
+     차트 점/슬라이스는 <g class="pt"> 안에 실제 text 노드(.tip)를 품고,
+     hover 즉시 CSS로 표시한다. paint-order의 흰 스트로크가 선·점 위에서도
+     글자를 판독 가능하게 유지. */
+  svg .pt .tip {
+    visibility: hidden; font-size: 11px; font-weight: 700; fill: #111827;
+    paint-order: stroke; stroke: #fff; stroke-width: 3.5px; stroke-linejoin: round;
+    pointer-events: none;
+  }
+  svg .pt:hover .tip { visibility: visible; }
+  /* 파이 슬라이스 hover 시 도넛 중앙의 합계 텍스트를 잠시 숨겨 팁 자리를 비움 */
+  svg .pt:hover ~ .pie-center { visibility: hidden; }
+
   .banner { border-radius: 10px; padding: 12px 16px; font-size: 14px; margin-bottom: 18px; }
   .banner-error { background: #fee2e2; color: #b91c1c; }
   .banner-success { background: #dcfce7; color: #15803d; }

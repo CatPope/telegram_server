@@ -252,11 +252,13 @@ func buildFailurePie(counts []ErrorCodeCount) *FailurePieView {
 		frac := float64(s.Count) / float64(total)
 		color := piePalette[i%len(piePalette)]
 		// rotate(-90) starts the first slice at 12 o'clock; the negative
-		// dashoffset walks each slice clockwise from there.
+		// dashoffset walks each slice clockwise from there. Hovering a slice
+		// shows its tip in the donut hole (the center total hides meanwhile —
+		// see the .pie-center sibling rule in base.html).
 		fmt.Fprintf(&b,
-			`<circle cx="%.0f" cy="%.0f" r="%.0f" fill="none" stroke="%s" stroke-width="%.0f" stroke-dasharray="%.2f %.2f" stroke-dashoffset="%.2f" transform="rotate(-90 %.0f %.0f)"><title>%s · %d건 (%.0f%%)</title></circle>`,
+			`<g class="pt"><circle cx="%.0f" cy="%.0f" r="%.0f" fill="none" stroke="%s" stroke-width="%.0f" stroke-dasharray="%.2f %.2f" stroke-dashoffset="%.2f" transform="rotate(-90 %.0f %.0f)"/>%s</g>`,
 			c, c, r, color, sw, frac*circ, circ, -acc*circ, c, c,
-			template.HTMLEscapeString(s.Code), s.Count, frac*100)
+			svgHoverTip(c, c+4, size, fmt.Sprintf("%s · %d건 (%.0f%%)", s.Code, s.Count, frac*100)))
 		legend = append(legend, PieLegendItem{
 			Code:  s.Code,
 			Count: s.Count,
@@ -265,11 +267,30 @@ func buildFailurePie(counts []ErrorCodeCount) *FailurePieView {
 		})
 		acc += frac
 	}
-	fmt.Fprintf(&b, `<text x="%.0f" y="%.0f" font-size="32" font-weight="800" fill="#111827" text-anchor="middle">%d</text>`, c, c-2, total)
-	fmt.Fprintf(&b, `<text x="%.0f" y="%.0f" font-size="12" fill="#6b7280" text-anchor="middle">실패 · 24h</text>`, c, c+20)
+	fmt.Fprintf(&b, `<text class="pie-center" x="%.0f" y="%.0f" font-size="32" font-weight="800" fill="#111827" text-anchor="middle">%d</text>`, c, c-2, total)
+	fmt.Fprintf(&b, `<text class="pie-center" x="%.0f" y="%.0f" font-size="12" fill="#6b7280" text-anchor="middle">실패 · 24h</text>`, c, c+20)
 	b.WriteString(`</svg>`)
 
 	return &FailurePieView{SVG: template.HTML(b.String()), Legend: legend, Total: total} //nolint:gosec // numeric/escaped content built above
+}
+
+// svgHoverTip renders the instant tooltip <text> node used inside a
+// `<g class="pt">` hover group. The native SVG <title> tooltip only appears
+// after the browser's fixed ~1s hover delay (요청사항: 마우스를 대면 즉시),
+// so charts carry a real text node that CSS reveals on :hover — the white
+// stroke behind the glyphs (paint-order) keeps it readable over lines and
+// dots. The label is escaped here; callers pass it raw. The anchor flips
+// near either edge so the tip never clips outside the viewBox.
+func svgHoverTip(x, y, w float64, label string) string {
+	anchor := "middle"
+	switch {
+	case x < 80:
+		anchor = "start"
+	case x > w-80:
+		anchor = "end"
+	}
+	return fmt.Sprintf(`<text class="tip" x="%.1f" y="%.1f" text-anchor="%s">%s</text>`,
+		x, y, anchor, template.HTMLEscapeString(label))
 }
 
 // niceAxisMax rounds ms up to a 1/2/5×10^k step so the strip plot's axis
@@ -365,18 +386,20 @@ func buildLatencyStrip(samples []LatencySample, stats LatencyStats) *LatencyStri
 	fmt.Fprintf(&b, `<line x1="%.1f" y1="42" x2="%.1f" y2="90" stroke="#111827" stroke-width="2"/>`, p50X, p50X)
 	fmt.Fprintf(&b, `<text x="%.1f" y="36" font-size="11" font-weight="600" fill="#111827" text-anchor="middle">p50 %s</text>`, p50X, formatLatency(stats.P50))
 	// Dots — index-based jitter (no randomness: pages must render identically
-	// on refresh) spreads overlapping fast traces vertically. The tooltip
-	// names the delivering app (요청사항: 발생 앱과 수치); app ids come from
-	// the DB but are escaped anyway — defense in depth.
+	// on refresh) spreads overlapping fast traces vertically. The hover tip
+	// names the delivering app (요청사항: 발생 앱과 수치, 즉시 표시); the
+	// invisible outer circle widens the hover target.
 	jitter := []float64{0, -9, 9, -17, 17}
 	for i, s := range samples {
 		ms := s.Secs * 1000
-		title := formatLatency(s.Secs)
+		label := formatLatency(s.Secs)
 		if s.AppID != "" {
-			title = template.HTMLEscapeString(s.AppID) + " · " + title
+			label = s.AppID + " · " + label
 		}
-		fmt.Fprintf(&b, `<circle cx="%.1f" cy="%.1f" r="6" fill="#2563eb" fill-opacity="0.55"><title>%s</title></circle>`,
-			xAt(math.Min(ms, axisMax)), dotY+jitter[i%len(jitter)], title)
+		x := xAt(math.Min(ms, axisMax))
+		cy := dotY + jitter[i%len(jitter)]
+		fmt.Fprintf(&b, `<g class="pt"><circle cx="%.1f" cy="%.1f" r="11" fill="transparent"/><circle cx="%.1f" cy="%.1f" r="6" fill="#2563eb" fill-opacity="0.55"/>%s</g>`,
+			x, cy, x, cy, svgHoverTip(x, cy-14, w, label))
 	}
 	b.WriteString(`</svg>`)
 
@@ -693,8 +716,14 @@ func buildLineChart(series []AppDayCount, cr chartRange, now time.Time) *LineCha
 			color = restLineColor
 		}
 		for i, c := range ln.counts {
-			fmt.Fprintf(&b, `<circle cx="%.1f" cy="%.1f" r="3" fill="%s"><title>%s · %s · %d건</title></circle>`,
-				xAt(i), yAt(c), color, pointLabel(spec, axis[i]), template.HTMLEscapeString(ln.label), c)
+			x, y := xAt(i), yAt(c)
+			tipY := y - 10
+			if tipY < 16 {
+				tipY = y + 20 // top-of-chart points tip downward instead of clipping
+			}
+			label := fmt.Sprintf("%s · %s · %d건", pointLabel(spec, axis[i]), ln.label, c)
+			fmt.Fprintf(&b, `<g class="pt"><circle cx="%.1f" cy="%.1f" r="9" fill="transparent"/><circle cx="%.1f" cy="%.1f" r="3" fill="%s"/>%s</g>`,
+				x, y, x, y, color, svgHoverTip(x, tipY, w, label))
 		}
 	}
 	b.WriteString(`</svg>`)

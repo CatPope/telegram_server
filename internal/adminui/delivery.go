@@ -396,8 +396,14 @@ func buildTrendChart(counts []StageDayCount, days int, stageFilter string, now t
 	if days <= trendPointCap {
 		for i, def := range defs {
 			for j, c := range series[i] {
-				fmt.Fprintf(&b, `<circle cx="%.1f" cy="%.1f" r="3" fill="%s"><title>%d/%d · %s · %d건</title></circle>`,
-					xAt(j), yAt(c), def.color, int(axis[j].Month()), axis[j].Day(), template.HTMLEscapeString(def.label), c)
+				x, y := xAt(j), yAt(c)
+				tipY := y - 10
+				if tipY < 16 {
+					tipY = y + 20 // top-of-chart points tip downward instead of clipping
+				}
+				label := fmt.Sprintf("%d/%d · %s · %d건", int(axis[j].Month()), axis[j].Day(), def.label, c)
+				fmt.Fprintf(&b, `<g class="pt"><circle cx="%.1f" cy="%.1f" r="9" fill="transparent"/><circle cx="%.1f" cy="%.1f" r="3" fill="%s"/>%s</g>`,
+					x, y, x, y, def.color, svgHoverTip(x, tipY, w, label))
 			}
 		}
 	}
